@@ -86,6 +86,21 @@ const EMOTION_FALLBACK: Record<string, string[]> = {
 
 const BREATH_BONE = '上半身';
 const HEAD_BONE = '頭';
+const EYES_BONE = '両目';
+const ARM_R_BONE = '右腕';
+const ARM_L_BONE = '左腕';
+
+/** T-pose → natural stance: rotate upper arms ~34° about Z so the model
+ *  stands with arms at its sides instead of the frozen bind pose
+ *  (+Z lowers the right arm, −Z the left — validated on a real PMX).
+ *  Mirrors the editor's MmdStage; a playing VMD owns these bones. */
+const ARM_DOWN_RAD = 0.6;
+
+/** Backbuffer long-edge cap. A fullscreen overlay at dpr ≥ 1 otherwise
+ *  allocates a 4K-class framebuffer; with SDEF skinning + the MMD
+ *  outline second pass that's enough sustained GPU load to wedge weaker
+ *  GPUs (reported as a frozen browser during camera interaction). */
+const MAX_RENDER_EDGE_PX = 2048;
 
 type BoneLike = { name: string; rotationQuaternion: Quaternion };
 
@@ -126,6 +141,7 @@ export default function MmdCanvas({
         alpha: true,
         premultipliedAlpha: false,
         stencil: true,
+        powerPreference: 'high-performance',
       });
       SdefInjector.OverrideEngineCreateEffect(engine);
       const scene = new Scene(engine);
@@ -269,10 +285,18 @@ export default function MmdCanvas({
         const blinkMorph = BLINK_MORPHS.find((n) => morphNames.includes(n)) ?? null;
 
         // ── per-frame driver: morph easing + lip-sync + idle ──
-        const breathBone = skeletonBones.find((b) => b.name === BREATH_BONE) ?? null;
-        const headBone = skeletonBones.find((b) => b.name === HEAD_BONE) ?? null;
-        const breathRest = breathBone ? breathBone.rotationQuaternion.clone() : null;
-        const headRest = headBone ? headBone.rotationQuaternion.clone() : null;
+        const boneByName = (name: string) => skeletonBones.find((b) => b.name === name) ?? null;
+        const breathBone = boneByName(BREATH_BONE);
+        const headBone = boneByName(HEAD_BONE);
+        const eyesBone = boneByName(EYES_BONE);
+        const armR = boneByName(ARM_R_BONE);
+        const armL = boneByName(ARM_L_BONE);
+        const restOf = (b: BoneLike | null) => (b ? b.rotationQuaternion.clone() : null);
+        const breathRest = restOf(breathBone);
+        const headRest = restOf(headBone);
+        const eyesRest = restOf(eyesBone);
+        const armRRest = restOf(armR);
+        const armLRest = restOf(armL);
         const tmpQ = new Quaternion();
         const outQ = new Quaternion();
 
@@ -280,6 +304,10 @@ export default function MmdCanvas({
         let blinkPhase = -1;
         const BLINK_MS = 170;
         let lipWeight = 0;
+        // gaze wander — small saccades every 2–5s, eased over ~120ms
+        let gazeYaw = 0;
+        let gazeTargetYaw = 0;
+        let nextSaccadeAt = performance.now() + 2200;
 
         const beforeRender = scene.onBeforeRenderObservable.add(() => {
           const now = performance.now();
@@ -308,18 +336,41 @@ export default function MmdCanvas({
             safeSetMorph(mmdModel, lipMorph, lipWeight < 0.01 ? 0 : lipWeight);
           }
 
-          // idle: breath sway
-          const t4 = (now % 4000) / 4000;
-          const s = Math.sin(t4 * Math.PI * 2);
+          // idle: layered natural stance + breath + sway + gaze
+          const breath = Math.sin(((now % 4000) / 4000) * Math.PI * 2); // 4s
+          const sway = Math.sin(((now % 7300) / 7300) * Math.PI * 2); // 7.3s
+
+          // arms — rest-down pose + breath-synced drift
+          const armDrift = breath * 0.012;
+          if (armR && armRRest) {
+            Quaternion.RotationYawPitchRollToRef(0, 0, ARM_DOWN_RAD + armDrift, tmpQ);
+            armRRest.multiplyToRef(tmpQ, outQ);
+            armR.rotationQuaternion = outQ;
+          }
+          if (armL && armLRest) {
+            Quaternion.RotationYawPitchRollToRef(0, 0, -(ARM_DOWN_RAD + armDrift), tmpQ);
+            armLRest.multiplyToRef(tmpQ, outQ);
+            armL.rotationQuaternion = outQ;
+          }
           if (breathBone && breathRest) {
-            Quaternion.RotationYawPitchRollToRef(0, s * 0.02, 0, tmpQ);
+            Quaternion.RotationYawPitchRollToRef(sway * 0.012, breath * 0.025, 0, tmpQ);
             breathRest.multiplyToRef(tmpQ, outQ);
             breathBone.rotationQuaternion = outQ;
           }
           if (headBone && headRest) {
-            Quaternion.RotationYawPitchRollToRef(0, -s * 0.01, 0, tmpQ);
+            Quaternion.RotationYawPitchRollToRef(-sway * 0.008, -breath * 0.012, 0, tmpQ);
             headRest.multiplyToRef(tmpQ, outQ);
             headBone.rotationQuaternion = outQ;
+          }
+          if (eyesBone && eyesRest) {
+            if (now >= nextSaccadeAt) {
+              gazeTargetYaw = (Math.random() - 0.5) * 0.09;
+              nextSaccadeAt = now + 2000 + Math.random() * 3000;
+            }
+            gazeYaw += (gazeTargetYaw - gazeYaw) * Math.min(1, dt / 120);
+            Quaternion.RotationYawPitchRollToRef(gazeYaw, 0, 0, tmpQ);
+            eyesRest.multiplyToRef(tmpQ, outQ);
+            eyesBone.rotationQuaternion = outQ;
           }
 
           // idle: blink
@@ -350,12 +401,19 @@ export default function MmdCanvas({
         });
 
         container.appendChild(canvas);
-        const resize = new ResizeObserver(() => engine.resize());
+        // native-dpr sharpness, but cap the backbuffer long edge (see
+        // MAX_RENDER_EDGE_PX) so fullscreen overlays don't allocate a
+        // 4K-class framebuffer on high-res displays.
+        const updateScaling = () => {
+          const dpr = window.devicePixelRatio || 1;
+          const longEdgeCss = Math.max(canvas.clientWidth, canvas.clientHeight, 1);
+          engine.setHardwareScalingLevel(Math.max(1 / dpr, longEdgeCss / MAX_RENDER_EDGE_PX));
+          engine.resize();
+        };
+        const resize = new ResizeObserver(updateScaling);
         resize.observe(container);
         disposers.push(() => resize.disconnect());
-        const dpr = window.devicePixelRatio || 1;
-        engine.setHardwareScalingLevel(1 / dpr);
-        engine.resize();
+        updateScaling();
 
         engine.runRenderLoop(() => scene.render());
         console.log(
