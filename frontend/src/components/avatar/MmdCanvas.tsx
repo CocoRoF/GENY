@@ -107,6 +107,41 @@ const MAX_RENDER_EDGE_PX = 2048;
 
 type BoneLike = { name: string; rotationQuaternion: Quaternion };
 
+/**
+ * ONE physics runtime for the lifetime of the page, shared across every
+ * MmdCanvas mount. `MultiPhysicsRuntime.dispose()` spin-waits on a wasm
+ * lock whose timeout is compiled out — disposing it after (or even
+ * before) engine teardown hard-locks the main thread forever, which was
+ * the "switching models in the connector freezes it" bug (A/B-proven in
+ * a minimal harness; reuse across scenes proven safe). So we create it
+ * once, register/unregister per scene, and never dispose it.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let sharedPhysicsRuntime: any | null = null;
+let sharedPhysicsFailed = false;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function getSharedPhysicsRuntime(): Promise<any | null> {
+  if (sharedPhysicsRuntime) return sharedPhysicsRuntime;
+  if (sharedPhysicsFailed) return null;
+  try {
+    const [{ GetMmdWasmInstance }, { MmdWasmInstanceTypeSPR }, { MultiPhysicsRuntime }] =
+      await Promise.all([
+        import('babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance'),
+        import('babylon-mmd/esm/Runtime/Optimized/InstanceType/singlePhysicsRelease'),
+        import('babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/multiPhysicsRuntime'),
+      ]);
+    const wasmInstance = await GetMmdWasmInstance(new MmdWasmInstanceTypeSPR());
+    const runtime = new MultiPhysicsRuntime(wasmInstance);
+    runtime.setGravity(new Vector3(0, -98, 0));
+    sharedPhysicsRuntime = runtime;
+    return runtime;
+  } catch (e) {
+    console.warn('[MmdCanvas] physics wasm unavailable — rigid fallback', e);
+    sharedPhysicsFailed = true;
+    return null;
+  }
+}
+
 export default function MmdCanvas({
   sessionId,
   model,
@@ -205,6 +240,11 @@ export default function MmdCanvas({
         }
         canvas.remove();
       };
+      // pushed FIRST so the reversed cleanup runs it LAST — the model
+      // must leave the (shared) physics world and the runtime must
+      // unregister BEFORE the scene/engine die, or stale bodies haunt
+      // the next mount
+      disposers.push(teardown);
 
       try {
         const container3d = await LoadAssetContainerAsync(model.url, scene, {
@@ -247,37 +287,32 @@ export default function MmdCanvas({
           for (const i of hiddenIdx) meshes[i]?.setEnabled(false);
         }
 
-        // Physics — optional; single-threaded WASM build.
+        // Physics — the page-global shared runtime (see its docblock:
+        // per-mount dispose hard-locks the main thread).
         let physicsOk = false;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let physics: any = null;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let physicsRuntime: any | null = null;
         try {
-          const [
-            { GetMmdWasmInstance },
-            { MmdWasmInstanceTypeSPR },
-            { MultiPhysicsRuntime },
-            { MmdBulletPhysics },
-          ] = await Promise.all([
-            import('babylon-mmd/esm/Runtime/Optimized/mmdWasmInstance'),
-            import('babylon-mmd/esm/Runtime/Optimized/InstanceType/singlePhysicsRelease'),
-            import('babylon-mmd/esm/Runtime/Optimized/Physics/Bind/Impl/multiPhysicsRuntime'),
-            import('babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics'),
-          ]);
+          physicsRuntime = await getSharedPhysicsRuntime();
           if (cancelled || myGen !== genRef.current) {
             teardown();
             return;
           }
-          const wasmInstance = await GetMmdWasmInstance(new MmdWasmInstanceTypeSPR());
-          if (cancelled || myGen !== genRef.current) {
-            teardown();
-            return;
+          if (physicsRuntime) {
+            const { MmdBulletPhysics } = await import(
+              'babylon-mmd/esm/Runtime/Optimized/Physics/mmdBulletPhysics'
+            );
+            if (cancelled || myGen !== genRef.current) {
+              teardown();
+              return;
+            }
+            physicsRuntime.register(scene);
+            disposers.push(() => physicsRuntime.unregister());
+            physics = new MmdBulletPhysics(physicsRuntime);
+            physicsOk = true;
           }
-          const physicsRuntime = new MultiPhysicsRuntime(wasmInstance);
-          physicsRuntime.setGravity(new Vector3(0, -98, 0));
-          physicsRuntime.register(scene);
-          disposers.push(() => physicsRuntime.dispose());
-          physics = new MmdBulletPhysics(physicsRuntime);
-          physicsOk = true;
         } catch (e) {
           console.warn('[MmdCanvas] physics unavailable — rigid fallback', e);
         }
@@ -290,6 +325,17 @@ export default function MmdCanvas({
         mmdRuntime.register(scene);
         const mmdModel = mmdRuntime.createMmdModel(rootMesh, { buildPhysics: physicsOk });
         mmdModelRef.current = mmdModel;
+        // ordered teardown: model (physics bodies out of the world)
+        // BEFORE the scene/engine die and before unregister runs —
+        // disposers run in reverse push order, so push this AFTER the
+        // physics-unregister disposer
+        disposers.push(() => {
+          try {
+            mmdRuntime.destroyMmdModel(mmdModel);
+          } catch {
+            /* already gone */
+          }
+        });
 
         // Camera: editor-saved pose wins; otherwise frame from bounds.
         const pose = cfg.camera;
@@ -551,8 +597,6 @@ export default function MmdCanvas({
         return;
       }
 
-      // one teardown for the whole successful mount
-      disposers.push(teardown);
     })();
 
     return () => {
