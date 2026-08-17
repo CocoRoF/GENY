@@ -92,12 +92,17 @@ const HEAD_BONE = '頭';
 const EYES_BONE = '両目';
 const ARM_R_BONE = '右腕';
 const ARM_L_BONE = '左腕';
+const ELBOW_R_BONE = '右ひじ';
+const ELBOW_L_BONE = '左ひじ';
 
 /** T-pose → natural stance: rotate upper arms ~34° about Z so the model
  *  stands with arms at its sides instead of the frozen bind pose
  *  (+Z lowers the right arm, −Z the left — validated on a real PMX).
- *  Mirrors the editor's MmdStage; a playing VMD owns these bones. */
-const ARM_DOWN_RAD = 0.6;
+ *  1.0 rad probe-validated: arms hang flush beside the body; 0.6 still
+ *  read as an A/T-pose. A soft elbow (±0.09) joins it so the arms
+ *  never read as rigid rods. Mirrors the editor's MmdStage; a playing
+ *  VMD owns these bones. */
+const ARM_DOWN_RAD = 1.0;
 
 /** Backbuffer long-edge cap. A fullscreen overlay at dpr ≥ 1 otherwise
  *  allocates a 4K-class framebuffer; with SDEF skinning + the MMD
@@ -476,12 +481,16 @@ export default function MmdCanvas({
         const eyesBone = boneByName(EYES_BONE);
         const armR = boneByName(ARM_R_BONE);
         const armL = boneByName(ARM_L_BONE);
+        const elbowR = boneByName(ELBOW_R_BONE);
+        const elbowL = boneByName(ELBOW_L_BONE);
         const restOf = (b: BoneLike | null) => (b ? b.rotationQuaternion.clone() : null);
         const breathRest = restOf(breathBone);
         const headRest = restOf(headBone);
         const eyesRest = restOf(eyesBone);
         const armRRest = restOf(armR);
         const armLRest = restOf(armL);
+        const elbowRRest = restOf(elbowR);
+        const elbowLRest = restOf(elbowL);
         const tmpQ = new Quaternion();
         const outQ = new Quaternion();
 
@@ -582,6 +591,16 @@ export default function MmdCanvas({
             Quaternion.RotationYawPitchRollToRef(0, 0, -(ARM_DOWN_RAD + armDrift), tmpQ);
             armLRest.multiplyToRef(tmpQ, outQ);
             armL.rotationQuaternion = outQ;
+          }
+          if (elbowR && elbowRRest) {
+            Quaternion.RotationYawPitchRollToRef(0.09 + armDrift * 0.5, 0, 0, tmpQ);
+            elbowRRest.multiplyToRef(tmpQ, outQ);
+            elbowR.rotationQuaternion = outQ;
+          }
+          if (elbowL && elbowLRest) {
+            Quaternion.RotationYawPitchRollToRef(-(0.09 + armDrift * 0.5), 0, 0, tmpQ);
+            elbowLRest.multiplyToRef(tmpQ, outQ);
+            elbowL.rotationQuaternion = outQ;
           }
           if (breathBone && breathRest) {
             Quaternion.RotationYawPitchRollToRef(sway * 0.012, breath * 0.025, 0, tmpQ);
