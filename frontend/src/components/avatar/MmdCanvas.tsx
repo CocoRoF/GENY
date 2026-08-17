@@ -119,6 +119,27 @@ type BoneLike = { name: string; rotationQuaternion: Quaternion };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let sharedPhysicsRuntime: any | null = null;
 let sharedPhysicsFailed = false;
+/** Ownership token for the scene binding. babylon-mmd's register()
+ *  silently NO-OPS while bound to any scene and unregister() detaches
+ *  whatever is bound — so overlapping mounts (React strict mode) must
+ *  steal explicitly and only unbind what they still own. */
+let sharedPhysicsOwner: object | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function bindSharedPhysics(owner: object, scene: any): void {
+  if (!sharedPhysicsRuntime) return;
+  sharedPhysicsRuntime.unregister(); // safe no-op when unbound
+  sharedPhysicsRuntime.register(scene);
+  sharedPhysicsOwner = owner;
+}
+function unbindSharedPhysics(owner: object): void {
+  if (sharedPhysicsOwner !== owner) return; // a newer mount owns it now
+  try {
+    sharedPhysicsRuntime?.unregister();
+  } catch {
+    /* best-effort */
+  }
+  sharedPhysicsOwner = null;
+}
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getSharedPhysicsRuntime(): Promise<any | null> {
   if (sharedPhysicsRuntime) return sharedPhysicsRuntime;
@@ -160,6 +181,9 @@ export default function MmdCanvas({
   // surfaces as a visible message instead of a silent blank.
   const [retryNonce, setRetryNonce] = useState(0);
   const retryCountRef = useRef(0);
+  // retry budget is PER TARGET — a model that exhausted its retries
+  // must not leave the next model with zero attempts
+  const lastAttemptKeyRef = useRef('');
   const [fatalError, setFatalError] = useState<string | null>(null);
   // in-place re-bakes keep the same name/url but change the config —
   // fingerprint it so hidden materials / camera / idle changes remount
@@ -181,6 +205,11 @@ export default function MmdCanvas({
   useEffect(() => {
     const container = containerRef.current;
     if (!container || !model?.url) return;
+    const attemptKey = `${model.url}|${cfgFingerprint}`;
+    if (lastAttemptKeyRef.current !== attemptKey) {
+      lastAttemptKeyRef.current = attemptKey;
+      retryCountRef.current = 0;
+    }
     const myGen = ++genRef.current;
     let cancelled = false;
     const disposers: (() => void)[] = [];
@@ -308,8 +337,9 @@ export default function MmdCanvas({
               teardown();
               return;
             }
-            physicsRuntime.register(scene);
-            disposers.push(() => physicsRuntime.unregister());
+            const owner = {};
+            bindSharedPhysics(owner, scene);
+            disposers.push(() => unbindSharedPhysics(owner));
             physics = new MmdBulletPhysics(physicsRuntime);
             physicsOk = true;
           }
@@ -359,7 +389,12 @@ export default function MmdCanvas({
         // Any failure falls back to the procedural idle silently —
         // a broken motion must never take the avatar down.
         let vmdPlaying = false;
-        let vmdHasMorphTracks = false;
+        // "the VMD actually closes the eyes" — NOT "any morph track
+        // exists". A motion with only mouth/expression tracks (or a
+        // studio edit saved with 표정 강도 0: blink track present, every
+        // key zero) must NOT silence the procedural blink, or the model
+        // stares dead-eyed for as long as the idle loops.
+        let vmdAnimatesBlink = false;
         const idleName = (model.idleMotionGroupName || '').trim();
         const idleVmd = idleName
           ? (cfg.vmds ?? []).find((v) => v.name === idleName)
@@ -368,16 +403,23 @@ export default function MmdCanvas({
           try {
             // sidecar vmd paths are relative to the ZIP ROOT — which maps
             // to /static/mmd-models/<name>/ (first four URL segments) —
-            // NOT to the .pmx's own directory (nested-bundle 404 bug)
+            // NOT to the .pmx's own directory (nested-bundle 404 bug).
+            // Encode each segment: '#'/'?' would truncate the URL and
+            // '%'+hex mis-decodes — a Korean or symbol-bearing motion
+            // name must survive the fetch.
             const baseUrl = model.url.split('/').slice(0, 4).join('/');
+            const encPath = idleVmd.path.split('/').map(encodeURIComponent).join('/');
             const vmdLoader = new VmdLoader(scene);
             vmdLoader.loggingEnabled = false;
-            const animation = await vmdLoader.loadAsync(idleVmd.name, `${baseUrl}/${idleVmd.path}`);
+            const animation = await vmdLoader.loadAsync(idleVmd.name, `${baseUrl}/${encPath}`);
             if (cancelled || myGen !== genRef.current) {
               teardown();
               return;
             }
-            vmdHasMorphTracks = (animation.morphTracks?.length ?? 0) > 0;
+            vmdAnimatesBlink = (animation.morphTracks ?? []).some(
+              (t: { name: string; weights: Float32Array }) =>
+                BLINK_MORPHS.includes(t.name) && Array.prototype.some.call(t.weights, (w: number) => w > 0.004),
+            );
             const handle = mmdModel.createRuntimeAnimation(animation);
             mmdModel.setRuntimeAnimation(handle);
             await mmdRuntime.seekAnimation(0, true);
@@ -387,6 +429,34 @@ export default function MmdCanvas({
           } catch (e) {
             console.warn('[MmdCanvas] idle VMD load failed — procedural idle fallback', e);
           }
+        }
+
+        // ── morph arbitration point ──────────────────────────────
+        // babylon-mmd evaluates VMD morph tracks in the BEFORE-ANIMATIONS
+        // phase (beforePhysics → animate() → morph.update()), overwriting
+        // every tracked morph each frame — so writes from
+        // onBeforeRenderObservable can never win against a VMD track.
+        // Wrap morph.update() to inject our weights AFTER animate() and
+        // BEFORE consumption: whatever is in `morphInject` beats the VMD
+        // that frame; removing a key hands the morph back to the VMD.
+        const morphInject = new Map<string, number>();
+        {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const morphCtl: any = mmdModel.morph;
+          const origUpdate = morphCtl.update.bind(morphCtl);
+          morphCtl.update = () => {
+            for (const [name, w] of morphInject) {
+              try {
+                morphCtl.setMorphWeight(name, w);
+              } catch {
+                /* morph absent on this model */
+              }
+            }
+            origUpdate();
+          };
+          disposers.push(() => {
+            morphCtl.update = origUpdate;
+          });
         }
 
         // Lip-sync morph: editor-pinned → standard names → any mouth
@@ -424,6 +494,11 @@ export default function MmdCanvas({
         let gazeTargetYaw = 0;
         let nextSaccadeAt = performance.now() + 2200;
 
+        // sustained emotion weights — kept injected for as long as the
+        // emotion holds so a VMD tracking the same morph can't erase
+        // the expression; released (VMD reclaims) when eased back to 0
+        const emotionSustain = new Map<string, number>();
+
         const beforeRender = scene.onBeforeRenderObservable.add(() => {
           const now = performance.now();
           const dt = engine.getDeltaTime();
@@ -431,48 +506,63 @@ export default function MmdCanvas({
           // emotion morph easing toward targets — move a constant
           // full-range fraction per ms so a transition_ms of 300 takes
           // ~300ms regardless of starting weight, without overshoot.
+          // All writes go through morphInject (see arbitration point):
+          // that is the only write that beats a VMD morph track.
+          for (const [name, w] of emotionSustain) morphInject.set(name, w);
           for (const [name, t] of morphTargetsRef.current) {
-            const cur = safeGetMorph(mmdModel, name);
+            const cur = morphInject.get(name) ?? safeGetMorph(mmdModel, name);
             const maxStep = t.ms > 0 ? dt / t.ms : 1;
             const delta = t.target - cur;
             const next = cur + Math.sign(delta) * Math.min(Math.abs(delta), maxStep);
+            morphInject.set(name, next);
             safeSetMorph(mmdModel, name, next);
             if (Math.abs(next - t.target) < 0.001) {
-              safeSetMorph(mmdModel, name, t.target);
               morphTargetsRef.current.delete(name);
+              if (t.target > 0.001) {
+                emotionSustain.set(name, t.target);
+                morphInject.set(name, t.target);
+              } else {
+                emotionSustain.delete(name);
+                morphInject.delete(name);
+                safeSetMorph(mmdModel, name, 0);
+              }
             }
           }
 
-          // lip-sync: RMS amplitude → smoothed mouth-open weight
+          // lip-sync: RMS amplitude → smoothed mouth-open weight.
+          // While speech shapes the mouth the injection wins over any
+          // VMD mouth track; in silence the key is removed so authored
+          // mouth animation (e.g. happy-bounce "あ" pops) plays freely.
           const lipMorph = lipSyncMorphRef.current;
           if (lipMorph) {
             const target = Math.min(1, lipAmpRef.current * 7);
             lipWeight += (target - lipWeight) * Math.min(1, dt / 60);
-            // write only while speech is actually shaping the mouth —
-            // a constant 0 every frame would permanently override any
-            // VMD morph track that animates the same mouth morph
             if (target > 0.004 || lipWeight > 0.004) {
+              morphInject.set(lipMorph, lipWeight < 0.01 ? 0 : lipWeight);
               safeSetMorph(mmdModel, lipMorph, lipWeight < 0.01 ? 0 : lipWeight);
+            } else if (!emotionSustain.has(lipMorph) && !morphTargetsRef.current.has(lipMorph)) {
+              morphInject.delete(lipMorph);
             }
           }
 
           // A playing VMD owns every bone — procedural stance/sway would
-          // fight its keyframes. Morph-wise: skip blink only when the
-          // motion has its own morph tracks; lip-sync + emotion easing
-          // stay active either way (TTS speech should own the mouth).
+          // fight its keyframes. Blink: yield ONLY to a VMD that actually
+          // animates the blink morph; otherwise the procedural blink runs
+          // and wins via injection (an all-zero blink track would pin the
+          // eyes open forever without it).
           if (vmdPlaying) {
-            if (vmdHasMorphTracks || !blinkMorph) return;
+            if (vmdAnimatesBlink || !blinkMorph) return;
             if (blinkPhase < 0) {
               if (now >= nextBlinkAt) blinkPhase = 0;
               else return;
             }
             blinkPhase = Math.min(1, blinkPhase + dt / BLINK_MS);
             const bw = blinkPhase < 0.5 ? blinkPhase * 2 : (1 - blinkPhase) * 2;
-            safeSetMorph(mmdModel, blinkMorph, bw);
+            morphInject.set(blinkMorph, bw);
             if (blinkPhase >= 1) {
               blinkPhase = -1;
               nextBlinkAt = now + 2500 + Math.random() * 3500;
-              safeSetMorph(mmdModel, blinkMorph, 0);
+              if (!emotionSustain.has(blinkMorph)) morphInject.delete(blinkMorph);
             }
             return;
           }
