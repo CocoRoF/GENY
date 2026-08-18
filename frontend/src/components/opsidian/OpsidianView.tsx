@@ -4,8 +4,13 @@ import { useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useOpsidianStore } from '@/store/useOpsidianStore';
 import { useHubMode } from '@/components/OpsidianHubContext';
-import { agentApi, memoryApi } from '@/lib/api';
-import { openVault, resetVault, loadGraphAround } from '@/lib/vaultCatalog';
+import { agentApi } from '@/lib/api';
+import {
+  openVault,
+  resetVault,
+  loadGraphAround,
+  openNote,
+} from '@/lib/vaultCatalog';
 import './opsidian.css';
 import SessionSelector from './SessionSelector';
 import OpsidianSidebar from './OpsidianSidebar';
@@ -33,9 +38,6 @@ export default function OpsidianView() {
     setSessions,
     setLoadingSessions,
     setSelectedSessionId,
-    openFile,
-    setFileDetail,
-    setViewMode,
   } = useOpsidianStore();
   const hub = useHubMode();
 
@@ -115,19 +117,8 @@ export default function OpsidianView() {
 
   // Handle graph node click → open file (same behaviour as old GraphView)
   const handleSelectFile = useCallback(
-    async (filename: string) => {
-      openFile(filename);
-      setViewMode('editor');
-      if (selectedSessionId) {
-        try {
-          const detail = await memoryApi.readFile(selectedSessionId, filename);
-          setFileDetail(detail);
-        } catch (e) {
-          console.error('Failed to read:', e);
-        }
-      }
-    },
-    [selectedSessionId, openFile, setFileDetail, setViewMode],
+    (filename: string) => openNote(selectedSessionId, filename),
+    [selectedSessionId],
   );
 
   if (!selectedSessionId) {

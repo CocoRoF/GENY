@@ -4,6 +4,7 @@ import { useMemo, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useOpsidianStore } from '@/store/useOpsidianStore';
+import { openNote } from '@/lib/vaultCatalog';
 import { memoryApi } from '@/lib/api';
 import {
   attachmentUrlTransform,
@@ -34,8 +35,6 @@ export default function NoteViewer() {
     fileDetail,
     files,
     selectedSessionId,
-    openFile,
-    setFileDetail,
   } = useOpsidianStore();
 
   // Navigate to a file via wikilink
@@ -47,17 +46,11 @@ export default function NoteViewer() {
           f.filename.toLowerCase().includes(targetLower) ||
           f.title.toLowerCase() === targetLower
       );
-      if (match && selectedSessionId) {
-        openFile(match.filename);
-        try {
-          const detail = await memoryApi.readFile(selectedSessionId, match.filename);
-          setFileDetail(detail);
-        } catch (e) {
-          console.error('Failed to read:', e);
-        }
+      if (match) {
+        await openNote(selectedSessionId, match.filename);
       }
     },
-    [files, selectedSessionId, openFile, setFileDetail]
+    [files, selectedSessionId]
   );
 
   // Process markdown body: attachment embeds FIRST (consumes the leading

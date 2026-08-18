@@ -65,6 +65,42 @@ function indexByFilename(notes: MemoryDayNote[]): Record<string, MemoryFileInfo>
   return out;
 }
 
+// ── opening a note ───────────────────────────────────────────────────
+//
+// "Show me this note" was written out five times — the sidebar, the tab
+// strip, search, the conversation list, a wikilink — and three of the
+// five forgot to switch to the editor. So clicking a note in the sidebar
+// while the graph was open re-seeded the graph and never showed the note:
+// the click did something, just not the thing it said.
+//
+// One function, because five copies proved the invariant cannot live in
+// five heads: choosing a note IS asking to read it.
+
+/** Guards against a slow response overwriting a newer selection: click A
+ *  then B quickly and A's body must not land in B's editor. */
+let openSeq = 0;
+
+export async function openNote(
+  sessionId: string | null,
+  filename: string,
+): Promise<void> {
+  const store = useOpsidianStore.getState();
+  const seq = ++openSeq;
+
+  store.openFile(filename);      // selection + tab
+  store.setViewMode('editor');   // the part three call sites kept forgetting
+
+  if (!sessionId) return;
+  try {
+    const detail = await memoryApi.readFile(sessionId, filename);
+    if (seq !== openSeq) return; // a newer click already won
+    store.setFileDetail(detail);
+  } catch (e) {
+    if (seq !== openSeq) return;
+    console.error(`Failed to read ${filename}:`, e);
+  }
+}
+
 /** Step 1 — counts only. What the sidebar renders before anything is
  *  expanded. */
 export async function openVault(sessionId: string): Promise<void> {

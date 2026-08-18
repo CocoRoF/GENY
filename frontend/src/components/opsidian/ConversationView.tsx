@@ -28,7 +28,7 @@
 
 import { useMemo, useState, useCallback } from 'react';
 import { useOpsidianStore } from '@/store/useOpsidianStore';
-import { memoryApi } from '@/lib/api';
+import { openNote } from '@/lib/vaultCatalog';
 import { useI18n } from '@/lib/i18n';
 import { MessageSquare, FileText, ExternalLink } from 'lucide-react';
 import { twMerge } from 'tailwind-merge';
@@ -48,8 +48,6 @@ export default function ConversationView() {
     selectedSessionId,
     files,
     selectedFile,
-    openFile,
-    setFileDetail,
   } = useOpsidianStore();
   const { t } = useI18n();
   const [sub, setSub] = useState<SubView>('stream');
@@ -83,16 +81,10 @@ export default function ConversationView() {
     return tree;
   }, [conversationFiles]);
 
-  const handleSelectFile = useCallback(async (filename: string) => {
-    if (!selectedSessionId) return;
-    openFile(filename);
-    try {
-      const detail = await memoryApi.readFile(selectedSessionId, filename);
-      setFileDetail(detail);
-    } catch (err) {
-      console.error('ConversationView: file read failed', err);
-    }
-  }, [selectedSessionId, openFile, setFileDetail]);
+  const handleSelectFile = useCallback(
+    (filename: string) => openNote(selectedSessionId, filename),
+    [selectedSessionId],
+  );
 
   if (!selectedSessionId) {
     return (

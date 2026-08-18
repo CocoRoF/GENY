@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import { useOpsidianStore } from '@/store/useOpsidianStore';
+import { openNote } from '@/lib/vaultCatalog';
 import { memoryApi } from '@/lib/api';
 import {
   Search,
@@ -29,9 +30,6 @@ export default function SearchPanel() {
     setSearchQuery,
     setSearchResults,
     setSearching,
-    openFile,
-    setFileDetail,
-    setViewMode,
   } = useOpsidianStore();
 
   const [localQuery, setLocalQuery] = useState(searchQuery);
@@ -56,18 +54,7 @@ export default function SearchPanel() {
     if (e.key === 'Enter') doSearch();
   };
 
-  const handleResultClick = async (filename: string) => {
-    openFile(filename);
-    setViewMode('editor');
-    if (selectedSessionId) {
-      try {
-        const detail = await memoryApi.readFile(selectedSessionId, filename);
-        setFileDetail(detail);
-      } catch (e) {
-        console.error('Failed to read:', e);
-      }
-    }
-  };
+  const handleResultClick = (filename: string) => openNote(selectedSessionId, filename);
 
   return (
     <div className="obs-search">

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useOpsidianStore, type SidebarPanel } from '@/store/useOpsidianStore';
 import { useI18n } from '@/lib/i18n';
-import { memoryApi } from '@/lib/api';
 import {
   FolderOpen,
   File,
@@ -55,6 +54,7 @@ import {
   loadDay,
   ensureFullIndex,
   openVault,
+  openNote,
 } from '@/lib/vaultCatalog';
 
 type _FileLike = { modified?: string; created?: string };
@@ -91,8 +91,6 @@ export default function OpsidianSidebar() {
     setSidebarCollapsed,
     setSidebarPanel,
     setViewMode,
-    openFile,
-    setFileDetail,
     setLoading,
   } = useOpsidianStore();
   const { t } = useI18n();
@@ -305,23 +303,16 @@ export default function OpsidianSidebar() {
     return files[selectedFile].linked_from || [];
   }, [selectedFile, files]);
 
-  const handleFileClick = async (filename: string) => {
-    openFile(filename);
-    if (selectedSessionId) {
-      try {
-        const detail = await memoryApi.readFile(selectedSessionId, filename);
-        setFileDetail(detail);
-      } catch (e) {
-        console.error('Failed to read file:', e);
-      }
-    }
-  };
+  const handleFileClick = (filename: string) => openNote(selectedSessionId, filename);
 
+  // `aria-current`: the highlight was the ONLY signal that this note is the
+  // open one, which leaves anyone not reading colour with nothing.
   const renderFileRow = (f: (typeof files)[string]) => (
     <button
       key={f.filename}
       className={`obs-sb-file ${selectedFile === f.filename ? 'active' : ''}`}
       onClick={() => handleFileClick(f.filename)}
+      aria-current={selectedFile === f.filename ? 'true' : undefined}
       title={f.filename}
     >
       <span
@@ -461,18 +452,21 @@ export default function OpsidianSidebar() {
       <div className="obs-sb-view-modes">
         <button
           className={`obs-sb-view-btn ${viewMode === 'editor' ? 'active' : ''}`}
+          aria-pressed={viewMode === 'editor'}
           onClick={() => setViewMode('editor')}
         >
           <FileText size={16} /> {t('opsidian.editor')}
         </button>
         <button
           className={`obs-sb-view-btn ${viewMode === 'graph' ? 'active' : ''}`}
+          aria-pressed={viewMode === 'graph'}
           onClick={() => setViewMode('graph')}
         >
           <GitGraph size={16} /> {t('opsidian.graph')}
         </button>
         <button
           className={`obs-sb-view-btn ${viewMode === 'conversation' ? 'active' : ''}`}
+          aria-pressed={viewMode === 'conversation'}
           onClick={() => setViewMode('conversation')}
           title={t('opsidian.conversationHint')}
         >
@@ -480,6 +474,7 @@ export default function OpsidianSidebar() {
         </button>
         <button
           className={`obs-sb-view-btn ${viewMode === 'digest' ? 'active' : ''}`}
+          aria-pressed={viewMode === 'digest'}
           onClick={() => setViewMode('digest')}
           title={t('opsidian.digestHint')}
         >
