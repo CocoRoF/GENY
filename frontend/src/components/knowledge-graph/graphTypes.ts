@@ -38,7 +38,17 @@ export interface GraphFilterState {
 }
 
 // ── UnifiedGraphView props ───────────────────────────────
+export type GraphStatus = 'idle' | 'loading' | 'ready' | 'error';
+
 export interface UnifiedGraphViewProps {
+  /** Why the node list looks the way it does. An empty list means three
+   *  different things — not asked yet, asking now, asked and genuinely
+   *  empty — and this view used to render all three identically, so a
+   *  seed that matched nothing was indistinguishable from a vault with
+   *  no memories. Optional: callers that load synchronously omit it. */
+  status?: GraphStatus;
+  /** The view is bounded and there was more. */
+  truncated?: boolean;
   nodes: KnowledgeGraphNode[];
   edges: KnowledgeGraphEdge[];
   onSelectFile: (filename: string) => void;

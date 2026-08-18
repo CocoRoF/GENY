@@ -674,6 +674,12 @@ export interface ToolPresetListResponse {
 
 export interface MemoryFileInfo {
   filename: string;
+  /** The INDEX's id for this note (`<scope>/<category>/<filename>`), when
+   *  it came from the catalogue. The client must never build one: the
+   *  format is the index's business and includes parts the browser cannot
+   *  know — reconstructing it as `<category>/<filename>` silently matched
+   *  nothing, so the graph came back empty whenever a note was selected. */
+  node_id?: string;
   title: string;
   category: string;
   tags: string[];

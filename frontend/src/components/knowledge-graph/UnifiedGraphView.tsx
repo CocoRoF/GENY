@@ -334,6 +334,8 @@ function ZoomButton({
 export default function UnifiedGraphView({
   nodes: rawNodes,
   edges: rawEdges,
+  status,
+  truncated,
   onSelectFile,
 }: UnifiedGraphViewProps) {
   const graphRef = useRef<NetworkGraph3DRef | null>(null);
@@ -543,13 +545,26 @@ export default function UnifiedGraphView({
 
   // 빈 상태
   if (rawNodes.length === 0) {
+    // Three different situations, three different things to say. Rendering
+    // them identically is how a still-loading graph and a seed that matched
+    // nothing both read as "this vault has no memories".
+    const [headline, detail] =
+      status === 'loading'
+        ? ['그래프를 불러오는 중…', '선택한 노트 주변을 가져오고 있습니다.']
+        : status === 'error'
+          ? ['그래프를 불러오지 못했습니다.', '잠시 후 다시 시도해 주세요.']
+          : [
+              '표시할 연결이 없습니다.',
+              // Notes are connected by shared tags and by similarity, NOT by
+              // wikilinks — the index does not carry them. Saying otherwise
+              // sent people looking for a feature that is not there.
+              '노트는 공유 태그와 유사도로 이어집니다. 태그가 붙은 노트가 쌓이면 여기에 나타납니다.',
+            ];
     return (
       <div className="obs-graph-empty">
         <GitGraph size={40} strokeWidth={1.2} style={{ opacity: 0.5 }} />
-        <p>No knowledge graph data available.</p>
-        <p style={{ fontSize: 12, color: 'var(--obs-text-muted)' }}>
-          Memory notes with [[wikilinks]] will appear as connected nodes.
-        </p>
+        <p>{headline}</p>
+        <p style={{ fontSize: 12, color: 'var(--obs-text-muted)' }}>{detail}</p>
       </div>
     );
   }
@@ -582,6 +597,23 @@ export default function UnifiedGraphView({
             </button>
           );
         })}
+        {truncated && (
+          // The view is a bounded neighbourhood, not the vault. Saying so
+          // is the difference between "this is all there is" and "this is
+          // what fits" — and the operator can only tell them apart if we
+          // say which one they are looking at.
+          <span
+            title="선택한 노트 주변만 보여주고 있습니다. 더 있습니다."
+            style={{
+              marginLeft: 10,
+              fontSize: 11,
+              opacity: 0.7,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            일부만 표시
+          </span>
+        )}
       </div>
 
       {/* 필터 컨트롤 */}

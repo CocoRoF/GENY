@@ -180,11 +180,36 @@ async def get_memory_tags(request: Request, session_id: str = Path(...)):
     return {"tags": counts}
 
 
+async def _resolve_node_id(provider: Any, catalog: Any, filename: str) -> Optional[str]:
+    """One note's FILENAME → the index's id for it, or None.
+
+    Asks the notes store for the note's own ref and lets the vector handle
+    stamp the id, so the two can never disagree about the format. Returns
+    None rather than raising: a seed that cannot be resolved should render
+    an empty graph, not a 500 on a tab switch.
+    """
+    try:
+        note = await provider.notes().read(filename)
+    except Exception:  # noqa: BLE001 — a seed lookup must not fail the view
+        logger.debug("graph seed: notes().read failed for %r", filename,
+                     exc_info=True)
+        return None
+    if note is None:
+        return None
+    try:
+        return catalog.node_id_for(note.ref)
+    except Exception:  # noqa: BLE001
+        logger.debug("graph seed: node_id_for failed for %r", filename,
+                     exc_info=True)
+        return None
+
+
 @router.get("/{session_id}/memory/graph/around")
 async def memory_graph_around(
     request: Request,
     session_id: str = Path(...),
     node: List[str] = Query(default_factory=list, description="seed note ids"),
+    file: Optional[str] = Query(None, description="seed with one note's FILENAME"),
     day: Optional[str] = Query(None, description="seed with a day's notes"),
     kind: Optional[str] = Query(None),
     depth: int = Query(1, ge=1, le=3),
@@ -197,14 +222,24 @@ async def memory_graph_around(
     the same question at the scale a screen is read at, and says so when it
     had to stop (``truncated``).
 
-    Seeds are note ids, or every note on a ``day`` — which is what the
-    sidebar has in hand when a day is expanded.
+    Seeds are note ids, every note on a ``day`` — which is what the sidebar
+    has in hand when a day is expanded — or a ``file``.
+
+    ``file`` exists because a browser cannot build an index id. The format
+    is ``<scope>/<category>/<filename>`` and the scope is not something the
+    client has; a client that assembled ``<category>/<filename>`` matched
+    nothing, so the graph came back empty for as long as a note was
+    selected. Resolving here keeps the id format in the layer that owns it.
     """
     provider = _get_provider(session_id)
     catalog = _vault_catalog(provider)
     if catalog is None:
         raise HTTPException(status_code=501, detail="No catalogue for this store")
     seeds = list(node)
+    if file:
+        resolved = await _resolve_node_id(provider, catalog, file)
+        if resolved:
+            seeds.append(resolved)
     if day:
         rows = await catalog.catalog_page(day=day, kind=kind, limit=max_nodes)
         seeds += [r["id"] for r in rows]

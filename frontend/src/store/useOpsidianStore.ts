@@ -58,8 +58,14 @@ export interface OpsidianState {
   openFiles: string[]; // tabs
 
   // Graph
+  //
+  // `graphStatus` exists because an empty node list means three different
+  // things — not asked yet, asking now, asked and genuinely empty — and
+  // the view rendered all three as "No knowledge graph data available".
   graphNodes: MemoryGraphNode[];
   graphEdges: MemoryGraphEdge[];
+  graphStatus: 'idle' | 'loading' | 'ready' | 'error';
+  graphTruncated: boolean;
 
   // Search
   searchQuery: string;
@@ -101,6 +107,8 @@ export interface OpsidianState {
   openFile: (fn: string) => void;
   closeFile: (fn: string) => void;
   setGraphData: (nodes: MemoryGraphNode[], edges: MemoryGraphEdge[]) => void;
+  setGraphStatus: (s: 'idle' | 'loading' | 'ready' | 'error') => void;
+  setGraphTruncated: (v: boolean) => void;
   setSearchQuery: (q: string) => void;
   setSearchResults: (r: MemorySearchResult[]) => void;
   setSearching: (v: boolean) => void;
@@ -135,6 +143,8 @@ const initialState = {
   openFiles: [] as string[],
   graphNodes: [] as MemoryGraphNode[],
   graphEdges: [] as MemoryGraphEdge[],
+  graphStatus: 'idle' as 'idle' | 'loading' | 'ready' | 'error',
+  graphTruncated: false,
   searchQuery: '',
   searchResults: [] as MemorySearchResult[],
   searching: false,
@@ -180,6 +190,8 @@ export const useOpsidianStore = create<OpsidianState>((set) => ({
       };
     }),
   setGraphData: (nodes, edges) => set({ graphNodes: nodes, graphEdges: edges }),
+  setGraphStatus: (graphStatus) => set({ graphStatus }),
+  setGraphTruncated: (graphTruncated) => set({ graphTruncated }),
   setSearchQuery: (q) => set({ searchQuery: q }),
   setSearchResults: (r) => set({ searchResults: r }),
   setSearching: (v) => set({ searching: v }),

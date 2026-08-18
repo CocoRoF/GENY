@@ -27,6 +27,8 @@ export default function OpsidianView() {
     rightPanelOpen,
     graphNodes,
     graphEdges,
+    graphStatus,
+    graphTruncated,
     setLoading,
     setSessions,
     setLoadingSessions,
@@ -97,13 +99,17 @@ export default function OpsidianView() {
   useEffect(() => {
     if (viewMode !== 'graph' || !selectedSessionId) return;
     let cancelled = false;
-    loadGraphAround(selectedSessionId)
-      .then((r) => {
-        if (!cancelled && r.truncated) {
-          console.info(`graph: showing ${r.count} nodes (bounded)`);
-        }
-      })
-      .catch((e) => console.error('Failed to load graph:', e));
+    // The seed is whatever is selected NOW. Switching tabs, opening a note
+    // and re-entering the tab all re-seed, because the effect is keyed on
+    // the selection as well as the mode.
+    loadGraphAround(selectedSessionId).catch((e) => {
+      if (cancelled) return;
+      // A failure must reach the view. Leaving the status on 'loading'
+      // would spin forever; leaving it 'ready' with no nodes would claim
+      // the vault is empty when the request simply failed.
+      useOpsidianStore.getState().setGraphStatus('error');
+      console.error('Failed to load graph:', e);
+    });
     return () => { cancelled = true; };
   }, [viewMode, selectedSessionId, selectedFile]);
 
@@ -158,6 +164,8 @@ export default function OpsidianView() {
               <UnifiedGraphView
                 nodes={graphNodes}
                 edges={graphEdges}
+                status={graphStatus}
+                truncated={graphTruncated}
                 onSelectFile={handleSelectFile}
               />
             </div>

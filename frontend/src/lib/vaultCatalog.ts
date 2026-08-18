@@ -44,6 +44,7 @@ export const DATE_GROUPED_CATEGORIES = new Set([
 function toFileInfo(n: MemoryDayNote): MemoryFileInfo {
   return {
     filename: n.filename,
+    node_id: n.id,
     title: n.title || n.filename,
     category: n.category || 'root',
     tags: [],
@@ -183,20 +184,30 @@ export async function loadGraphAround(
     if (!node) day = store.overview?.days?.[0]?.day;
   }
   if (!node && !day) {
+    // Nothing to centre on — that is a finished answer, not a pending one.
     store.setGraphData([], []);
+    store.setGraphTruncated(false);
+    store.setGraphStatus('ready');
     return { truncated: false, count: 0 };
   }
+  store.setGraphStatus('loading');
 
-  // A note id in the index is `<category>/<filename>`; the sidebar and
-  // the editor both speak filenames. Resolve through what we know.
-  let seedIds: string[] | undefined;
-  if (node) {
-    const info = store.files[node];
-    seedIds = [info?.category ? `${info.category}/${node}` : node];
-  }
+  // The sidebar and the editor speak FILENAMES; the index speaks ids of
+  // the form `<scope>/<category>/<filename>` — a shape that includes the
+  // scope, which the browser has no way to know. Building one here
+  // produced `<category>/<filename>`, matched nothing, and left the graph
+  // empty for exactly as long as a note was selected.
+  //
+  // So: use the id the catalogue already handed us, and when we do not
+  // have one (a note opened from search, a wikilink, the digest), let the
+  // server resolve the filename. Either way the client never invents it.
+  const info = node ? store.files[node] : undefined;
+  const seedIds = info?.node_id ? [info.node_id] : undefined;
+  const seedFile = node && !seedIds ? node : undefined;
 
   const res = await memoryApi.getGraphAround(sessionId, {
     node: seedIds,
+    file: seedFile,
     day,
     depth: opts.depth ?? 1,
     maxNodes: opts.maxNodes ?? 300,
@@ -222,6 +233,8 @@ export async function loadGraphAround(
     weight: e.w,
   }));
   store.setGraphData(nodes, edges);
+  store.setGraphTruncated(!!res.truncated);
+  store.setGraphStatus('ready');
   return { truncated: !!res.truncated, count: nodes.length };
 }
 
@@ -233,5 +246,7 @@ export function resetVault(): void {
   store.setMemoryIndex(null);
   store.setFullIndexLoaded(false);
   store.setGraphData([], []);
+  store.setGraphStatus('idle');
+  store.setGraphTruncated(false);
   useOpsidianStore.setState({ daysByCategory: {}, loadedDays: {} });
 }

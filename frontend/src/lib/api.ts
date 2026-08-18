@@ -2556,6 +2556,10 @@ export const memoryApi = {
     sessionId: string,
     params: {
       node?: string[];
+      /** A note FILENAME for the server to resolve into an index id. Use
+       *  this rather than assembling an id here — the format belongs to
+       *  the index and includes the scope, which the browser cannot know. */
+      file?: string;
       day?: string;
       kind?: string;
       depth?: number;
@@ -2564,6 +2568,7 @@ export const memoryApi = {
   ) => {
     const qs = new URLSearchParams();
     (params.node ?? []).forEach((n) => qs.append('node', n));
+    if (params.file) qs.set('file', params.file);
     if (params.day) qs.set('day', params.day);
     if (params.kind) qs.set('kind', params.kind);
     if (params.depth != null) qs.set('depth', String(params.depth));
