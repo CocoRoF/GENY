@@ -57,6 +57,78 @@ def _feature_vector(hit) -> Optional[np.ndarray]:
     return np.array([f.get(name, 0.0) for name in FEATURES], dtype=np.float32)
 
 
+# ── note metadata → index fields ─────────────────────────────────────
+#
+# The index ranks on 14 features. Five of them read metadata the write
+# path never sent, so in production they were dead constants: measured
+# 2026-08-18 across three live vaults, EVERY node had importance=1.0,
+# pinned=0, and empty tags and title — 0 tag edges, and `title_hit` and
+# `ppr_tag` structurally always zero. The notes themselves carry all of
+# it (1497 of 1500 sampled had title/tags/importance in frontmatter); it
+# was simply dropped at the handle.
+
+#: The vault speaks importance as a LABEL; the index ranks on a WEIGHT.
+#: Keeping the translation in one named place is the point — reading a
+#: weight as a label is what took the graph tab down on 2026-08-18.
+_IMPORTANCE_WEIGHT = {
+    "critical": 2.0,
+    "high": 1.5,
+    "medium": 1.0,
+    "low": 0.5,
+}
+
+#: How a note says "keep me": `pin_policy` writes these markers when it
+#: promotes an insight into `critical/`.
+_PIN_TAGS = frozenset({"pinned", "auto-pinned"})
+
+
+def _importance_weight(raw: Any) -> float:
+    """Label → ranking weight. Unknown labels rank neutral, never zero:
+    an unrecognised word must not bury a note."""
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return float(raw)
+    label = str(getattr(raw, "value", raw) or "").strip().lower()
+    return _IMPORTANCE_WEIGHT.get(label, 1.0)
+
+
+def _accepted_kwargs(fn: Any) -> frozenset:
+    """Which keyword names *fn* will take — ``**kwargs`` means all of them.
+
+    Used only on the version-skew fallback: an engine old enough to lack
+    batch indexing may also predate some of these fields, and that branch
+    exists to keep memory working through exactly that kind of skew.
+    """
+    import inspect
+
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):  # pragma: no cover — builtins/C funcs
+        return frozenset()
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return frozenset({"kind", "title", "tags", "importance", "pinned",
+                          "updated_at"})
+    return frozenset(params)
+
+
+def _index_meta(note: Any) -> Dict[str, Any]:
+    """The fields a note can contribute to its index row.
+
+    Deliberately NOT including wikilinks. In this vault all 284 of them
+    are image embeds (`![[frame.jpg]]`) rather than note-to-note links,
+    so indexing them would manufacture LINK edges pointing at nodes that
+    do not exist. Revisit when notes actually cross-link — and then
+    resolve targets to node ids on BOTH write paths at once, or the two
+    will disagree on the content digest and re-index each other forever.
+    """
+    tags = [str(t) for t in (getattr(note, "tags", None) or []) if str(t).strip()]
+    return {
+        "title": str(getattr(note, "title", "") or ""),
+        "tags": tags,
+        "importance": _importance_weight(getattr(note, "importance", None)),
+        "pinned": bool(_PIN_TAGS & set(tags)),
+    }
+
+
 class SynapseVectorHandle:
     """Duck-typed ``VectorHandle`` backed by a local Synapse engine.
 
@@ -98,11 +170,19 @@ class SynapseVectorHandle:
     # here is dispatched through ``asyncio.to_thread`` — the loop keeps serving
     # other sessions/health while one session's memory work runs on a worker.
 
-    async def index(self, ref: NoteRef, text: str) -> int:
+    async def index(self, ref: NoteRef, text: str, note: Any = None) -> int:
+        # `note` is optional and additive: the batch path and this one must
+        # derive the SAME row for the same note, because the engine's
+        # idempotence digest covers title/tags/importance/pinned. If one
+        # path sent them and the other did not, every note would flip
+        # between two digests and re-index itself forever.
+        meta = _index_meta(note) if note is not None else {}
+
         def _run() -> None:
             with inflight.track("index"):
                 self._m.index(_node_id(ref), text,
-                              kind=str(getattr(ref, "category", None) or "note"))
+                              kind=str(getattr(ref, "category", None) or "note"),
+                              **meta)
         await asyncio.to_thread(_run)
         return 1
 
@@ -123,6 +203,12 @@ class SynapseVectorHandle:
             }
             if len(item) > 2 and item[2]:
                 row["updated_at"] = float(item[2])
+            # Fourth form: the NOTE itself, so title/tags/importance/pinned
+            # reach the index instead of being dropped here (see
+            # `_index_meta`). Optional so a caller that only has bytes —
+            # and every non-Synapse VectorHandle — is unaffected.
+            if len(item) > 3 and item[3] is not None:
+                row.update(_index_meta(item[3]))
             payload.append(row)
 
         def _run() -> int:
@@ -137,15 +223,63 @@ class SynapseVectorHandle:
                     # Older adaptor. Slow, but a version skew must not take
                     # memory out entirely — this is the whole vault's write
                     # path, not an optional feature.
+                    # Send the metadata only if this older engine can take
+                    # it. The point of this branch is that a version skew
+                    # must not take memory out entirely, so it must not
+                    # itself become a way to break on an old signature.
+                    accepted = _accepted_kwargs(self._m.index)
                     for item in payload:
-                        self._m.index(item["node_id"], item["text"],
-                                      kind=item["kind"])
+                        extra = {k: v for k, v in item.items()
+                                 if k in accepted
+                                 and k not in ("node_id", "text")}
+                        self._m.index(item["node_id"], item["text"], **extra)
                     return len(payload)
                 out = batch(payload, chunk_size=200)
             return int(out.get("indexed", 0))
 
         # One hop to the worker for the whole batch (not per item) — the initial
         # session re-index is exactly this path.
+        return await asyncio.to_thread(_run)
+
+    # ── write-contract versioning ────────────────────────────────────
+    #
+    #: Bump when this handle starts sending the engine something NEW that
+    #: the idempotence digest covers. Existing rows are only re-offered
+    #: when their note's timestamp moves or their digest is blank, so a
+    #: richer write path would otherwise reach only notes edited after the
+    #: deploy — leaving the vault permanently half-indexed, with new notes
+    #: ranked on live features and old ones on dead constants.
+    #:
+    #: 1: title / tags / importance / pinned started being sent
+    #:    (2026-08-18). Before this every node in production had
+    #:    importance=1.0, pinned=0 and empty tags/title.
+    _WRITE_CONTRACT = 1
+    _CONTRACT_PARAM = "geny_write_contract"
+
+    async def ensure_write_contract(self) -> int:
+        """Blank every digest once when the write contract has moved.
+
+        Returns how many rows were invalidated (0 when already current).
+        The reconcile treats a blank digest as stale, so the next warm-up
+        re-offers the vault and it lands with the full metadata.
+        """
+        def _run() -> int:
+            store = getattr(self._m, "store", None)
+            if store is None:  # pragma: no cover — older adaptor
+                return 0
+            try:
+                raw = store.get_param(self._CONTRACT_PARAM)
+                seen = int(raw.decode()) if raw else 0
+            except Exception:  # noqa: BLE001 — unreadable marker = "old"
+                seen = 0
+            if seen >= self._WRITE_CONTRACT:
+                return 0
+            with inflight.track("write_contract_upgrade"):
+                n = int(store.clear_content_shas())
+                store.put_param(self._CONTRACT_PARAM,
+                                str(self._WRITE_CONTRACT).encode())
+            return n
+
         return await asyncio.to_thread(_run)
 
     # ── incremental host support ─────────────────────────────────────

@@ -789,6 +789,19 @@ class SessionMemoryManager:
         if not hasattr(vector_handle, "manifest"):
             return await self._vector_full_reindex(notes_handle, vector_handle)
         try:
+            # Before diffing: if the WRITE contract moved (this handle now
+            # sends the engine metadata it used to drop), blank the digests
+            # once so the diff below sees the vault as stale and re-offers
+            # it with the full row. Without this the richer write path would
+            # only ever reach notes edited after the deploy.
+            upgrade = getattr(vector_handle, "ensure_write_contract", None)
+            if upgrade is not None:
+                invalidated = await upgrade()
+                if invalidated:
+                    logger.info(
+                        "memory: write contract advanced — %d rows queued for "
+                        "re-index with full note metadata", invalidated,
+                    )
             manifest = await vector_handle.manifest()
             metas = await notes_handle.list()
 
@@ -894,7 +907,12 @@ class SessionMemoryManager:
                 continue
             stamp = getattr(meta, "updated_at", None)
             ts = stamp.timestamp() if hasattr(stamp, "timestamp") else None
-            items.append((note.ref, note.body, ts))
+            # The NOTE rides along, not just its body: title, tags and
+            # importance are what four of the index's fourteen ranking
+            # features are computed from, and dropping them here is what
+            # left every node in production at importance=1.0, pinned=0,
+            # with no tags and no title.
+            items.append((note.ref, note.body, ts, note))
         return items
 
     async def _reconcile_tail(self, notes_handle, vector_handle, metas) -> None:
