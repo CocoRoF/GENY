@@ -108,7 +108,12 @@ function NodeInfoPanel({
   onClose: () => void;
 }) {
   const color = CATEGORY_COLORS[node.category] ?? DEFAULT_NODE_COLOR;
-  const impColor = IMPORTANCE_COLOR[(node.importance ?? '').toLowerCase()] ?? '#8b95b0';
+  // `String(...)`, not a bare `??`: this component is fed by three
+  // different graph sources, and one of them once supplied the index's
+  // numeric importance WEIGHT here — `.toLowerCase()` threw and took
+  // the entire graph tab down with it. An unknown value should cost a
+  // default colour, never the view.
+  const impColor = IMPORTANCE_COLOR[String(node.importance ?? '').toLowerCase()] ?? '#8b95b0';
   const summary = cleanSummary(node.summary);
   const hasTags = !!node.tags && node.tags.length > 0;
 
@@ -431,7 +436,7 @@ export default function UnifiedGraphView({
     for (const n of rawNodes) {
       if (!noCategoryFilter && !filter.categories.has(n.category)) continue;
       if (!filter.importance.has(n.importance)) continue;
-      if (query && !n.label.toLowerCase().includes(query)) continue;
+      if (query && !String(n.label ?? '').toLowerCase().includes(query)) continue;
       visible.add(n.id);
     }
 

@@ -143,6 +143,20 @@ export async function ensureFullIndex(sessionId: string): Promise<void> {
   store.setFullIndexLoaded(true);
 }
 
+/** The index stores `importance` as a ranking WEIGHT (REAL, default 1.0);
+ *  the UI colours by a LABEL. Only a genuine label survives — anything
+ *  numeric, null, or unexpected becomes the neutral one, because a weight
+ *  is not a quieter way of saying "high". */
+function importanceLabel(raw: unknown, pinned?: boolean): string {
+  if (typeof raw === 'string') {
+    const label = raw.toLowerCase();
+    if (label === 'critical' || label === 'high' || label === 'medium' || label === 'low') {
+      return label;
+    }
+  }
+  return pinned ? 'critical' : 'medium';
+}
+
 /**
  * The graph around a seed, at the scale a screen is read at.
  *
@@ -192,7 +206,13 @@ export async function loadGraphAround(
     id: n.id,
     label: n.title || n.id.split('/').pop() || n.id,
     category: n.kind || 'root',
-    importance: n.importance || (n.pinned ? 'critical' : 'medium'),
+    // `importance` in the INDEX is a ranking weight (a REAL, default 1.0),
+    // not the 'critical' | 'high' | 'medium' | 'low' label the graph colours
+    // by — and Geny never writes a label there at all. Passing the number
+    // through crashed the whole graph tab on `.toLowerCase()`. The index
+    // cannot answer this question, so say so with a neutral label rather
+    // than dressing a weight up as one.
+    importance: importanceLabel(n.importance, n.pinned),
     charCount: n.text_len,
   }));
   const edges = (res.edges || []).map((e) => ({

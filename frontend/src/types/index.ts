@@ -851,7 +851,11 @@ export interface MemoryNeighbourhoodNode {
   updated_at: string | null;
   text_len: number;
   pinned: boolean;
-  importance: string | null;
+  /** The index's ranking WEIGHT (a REAL, default 1.0) — NOT the
+   *  'critical' | 'high' | 'medium' | 'low' label the UI colours by.
+   *  Typed as it actually arrives so nothing can hand it to a string
+   *  method by mistake; convert through `importanceLabel`. */
+  importance: number | string | null;
 }
 
 export interface MemoryNeighbourhoodEdge {
