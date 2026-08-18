@@ -212,7 +212,7 @@ export async function loadGraphAround(
     // through crashed the whole graph tab on `.toLowerCase()`. The index
     // cannot answer this question, so say so with a neutral label rather
     // than dressing a weight up as one.
-    importance: importanceLabel(n.importance, n.pinned),
+    importance: importanceLabel(n.importance_label ?? n.importance, n.pinned),
     charCount: n.text_len,
   }));
   const edges = (res.edges || []).map((e) => ({

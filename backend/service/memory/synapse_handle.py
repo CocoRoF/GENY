@@ -82,6 +82,26 @@ _IMPORTANCE_WEIGHT = {
 _PIN_TAGS = frozenset({"pinned", "auto-pinned"})
 
 
+def importance_label(weight: Any) -> str:
+    """Weight → label, the inverse of ``_IMPORTANCE_WEIGHT``.
+
+    Readers (the graph view colours by importance) need the label back.
+    Deriving it HERE keeps the scale in the one module that defines it —
+    a client that had to know "2.0 means critical" would be a second copy
+    of the mapping, and the first thing to drift.
+    """
+    try:
+        w = float(weight)
+    except (TypeError, ValueError):
+        return "medium"
+    best, best_gap = "medium", None
+    for label, value in _IMPORTANCE_WEIGHT.items():
+        gap = abs(value - w)
+        if best_gap is None or gap < best_gap:
+            best, best_gap = label, gap
+    return best
+
+
 def _importance_weight(raw: Any) -> float:
     """Label → ranking weight. Unknown labels rank neutral, never zero:
     an unrecognised word must not bury a note."""

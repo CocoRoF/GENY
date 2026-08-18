@@ -210,6 +210,15 @@ async def memory_graph_around(
     if not seeds:
         return {"nodes": [], "edges": [], "truncated": False}
     out = await catalog.neighbourhood(seeds, depth=depth, max_nodes=max_nodes)
+    # The index stores importance as a ranking WEIGHT; a reader colouring by
+    # importance needs the LABEL. Deriving it here — next to the module that
+    # defines the scale — keeps clients from carrying a second copy of the
+    # mapping, which is the copy that drifts. (A client that read the weight
+    # as a label is exactly what broke the graph tab on 2026-08-18.)
+    from service.memory.synapse_handle import importance_label
+
+    for node in out.get("nodes", []):
+        node["importance_label"] = importance_label(node.get("importance"))
     return out
 
 

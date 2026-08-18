@@ -226,3 +226,23 @@ async def test_a_kwargs_engine_receives_everything():
     await handle.index_batch([(_Ref(), "본문", None, _note())])
     assert seen[0]["title"] == "제목"
     assert seen[0]["importance"] == 1.5
+
+
+# ── the label round-trip ─────────────────────────────────────────────
+
+def test_weight_round_trips_back_to_its_label():
+    """Readers colour by the label. Deriving it server-side keeps the
+    scale in one module — a client copy is the copy that drifts."""
+    for label in ("critical", "high", "medium", "low"):
+        assert sh.importance_label(sh._importance_weight(label)) == label
+
+
+def test_an_off_scale_weight_snaps_to_the_nearest_label():
+    assert sh.importance_label(1.9) == "critical"
+    assert sh.importance_label(0.6) == "low"
+
+
+def test_a_junk_weight_reads_neutral():
+    """Never blank, never a crash — an unknown weight is 'medium'."""
+    assert sh.importance_label(None) == "medium"
+    assert sh.importance_label("어쩌구") == "medium"

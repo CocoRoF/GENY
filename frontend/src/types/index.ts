@@ -856,6 +856,10 @@ export interface MemoryNeighbourhoodNode {
    *  Typed as it actually arrives so nothing can hand it to a string
    *  method by mistake; convert through `importanceLabel`. */
   importance: number | string | null;
+  /** The label the backend derived from that weight. Preferred when
+   *  present: the scale lives on the server, so the client does not need
+   *  a second copy of "2.0 means critical" to drift from. */
+  importance_label?: string | null;
 }
 
 export interface MemoryNeighbourhoodEdge {
