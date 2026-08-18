@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from service.auth.auth_middleware import require_auth
 
 from service.executor import get_agent_session_manager
+from datetime import datetime, timezone
 
 logger = getLogger(__name__)
 
@@ -297,6 +298,27 @@ def _vault_catalog(provider):
     return vector if vector is not None and hasattr(vector, "catalog_counts") else None
 
 
+def _iso(epoch: Any) -> Optional[str]:
+    """Index epoch → ISO 8601, the shape the rest of this API speaks.
+
+    The index stores timestamps as a REAL. `/memory/files` has always
+    returned ISO strings for the same concept, so a catalogue endpoint
+    handing back a float leaks an internal representation and lands a
+    number where every caller expects text — the vault sidebar sorts with
+    `localeCompare`, which threw and took the note list down (2026-08-18).
+    """
+    try:
+        value = float(epoch)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    try:
+        return datetime.fromtimestamp(value, tz=timezone.utc).astimezone().isoformat()
+    except (OverflowError, OSError, ValueError):  # pragma: no cover — absurd clocks
+        return None
+
+
 @router.get("/{session_id}/memory/overview")
 async def memory_overview(
     request: Request,
@@ -359,7 +381,7 @@ async def memory_day(
                 "filename": r["id"].rsplit("/", 1)[-1],
                 "category": r["kind"],
                 "title": r["title"],
-                "updated_at": r["updated_at"],
+                "updated_at": _iso(r["updated_at"]),
                 "char_count": r["text_len"],
                 "pinned": r["pinned"],
             }
