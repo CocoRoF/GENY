@@ -319,6 +319,27 @@ class SessionInfo(BaseModel):
         description="Session role: 'worker', 'developer', 'researcher', or 'planner'"
     )
 
+    # Persona in force for this session.
+    #
+    # `persona_preset_id` is the session's OWN choice (None = follow the
+    # environment). `effective_persona_preset_id` + `persona_source` say
+    # what actually runs and where it came from, because a persona that
+    # resolves from somewhere else is exactly the thing an operator cannot
+    # deduce from the screen.
+    persona_preset_id: Optional[str] = Field(
+        default=None,
+        description="This session's own persona preset; None = follow the environment.",
+    )
+    effective_persona_preset_id: Optional[str] = Field(
+        default=None, description="The persona actually in force.",
+    )
+    persona_source: Optional[str] = Field(
+        default=None, description="'session' | 'environment' | 'none'.",
+    )
+    persona_name: Optional[str] = Field(
+        default=None, description="Display name of the effective persona.",
+    )
+
     # Keep-awake override, per session.
     #
     # None = follow the host policy (the Session Lifecycle setting, plus

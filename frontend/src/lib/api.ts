@@ -317,6 +317,34 @@ export const agentApi = {
       method: 'POST',
     }),
 
+  /** PUT /api/agents/{id}/persona — give THIS session its own persona.
+   *
+   * `null` clears the override so the session follows its environment
+   * again. Persisted, so it survives eviction and restart; a live idle
+   * session rebuilds immediately (`applied_now`), a busy one picks it up
+   * between turns rather than being torn down mid-answer. */
+  setPersona: (id: string, presetId: string | null) =>
+    apiCall<{
+      success: boolean;
+      persona_preset_id: string | null;
+      effective_preset_id: string | null;
+      persona_source: string;
+      applied_now: boolean;
+      live: boolean;
+    }>(`/api/agents/${id}/persona`, {
+      method: 'PUT',
+      body: JSON.stringify({ persona_preset_id: presetId }),
+    }),
+
+  /** POST /api/agents/{id}/restart — rebuild now, keeping memory.
+   *
+   * 409 while a turn is running: a rebuild mid-answer loses the answer. */
+  restart: (id: string) =>
+    apiCall<{ success: boolean; restarted: boolean; reason?: string }>(
+      `/api/agents/${id}/restart`,
+      { method: 'POST' },
+    ),
+
   /** PUT /api/agents/{id}/always-on — pin this session awake.
    *
    * `true` keeps it resident whatever the host's idle policy says,

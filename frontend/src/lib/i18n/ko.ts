@@ -873,6 +873,20 @@ const ko: Translations = {
 
   // ─── Info Tab ───
   info: {
+    persona: {
+      title: '페르소나',
+      followEnv: '환경 설정을 따름',
+      fromSession: '이 세션 전용',
+      fromEnv: '환경에서 상속',
+      none: '적용된 페르소나가 없습니다.',
+      restart: '다시 시작',
+      restartHint: '지금 세션을 다시 구성합니다. 대화와 기억은 그대로입니다.',
+    },
+    personaAppliedNow: '적용했습니다.',
+    personaAfterTurn: '저장했습니다 — 진행 중인 턴이 끝나면 반영됩니다.',
+    personaOnWake: '저장했습니다 — 세션이 깨어날 때 반영됩니다.',
+    restarted: '세션을 다시 시작했습니다.',
+    restartDormant: '휴면 상태라 다음 접근에 새로 구성됩니다.',
     wakeUp: '깨우기',
     wakingUp: '깨우는 중…',
     keepAwakeOn: '상시 유지 중',

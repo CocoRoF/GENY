@@ -1240,6 +1240,64 @@ async def stop_execution(
     }
 
 
+@router.put("/{session_id}/persona")
+async def set_session_persona(
+    session_id: str = Path(..., description="Session ID"),
+    body: Dict[str, Any] = Body(default_factory=dict),
+    auth: dict = Depends(require_auth),
+):
+    """Give this session its own persona, or hand it back to its env.
+
+    ``{"persona_preset_id": "<id>"}`` overrides; ``null`` clears the
+    override so the session follows its environment again.
+
+    Until now a persona was a property of the ENVIRONMENT alone: the only
+    way to give one session a different character was to build it another
+    environment, and the only way to change one was to edit an environment
+    that every session on it shares.
+
+    Persisted first, so the choice survives eviction and restart. A live
+    and idle session rebuilds immediately (``applied_now``); one that is
+    mid-turn is flagged and picks it up between turns rather than being
+    torn down underneath a running answer.
+    """
+    raw = body.get("persona_preset_id", None)
+    if raw is not None and not isinstance(raw, str):
+        raise HTTPException(
+            status_code=400, detail="persona_preset_id must be a string or null",
+        )
+    _enforce_session_owner(session_id, auth)
+    try:
+        return {"success": True, **await agent_manager.set_session_persona(session_id, raw)}
+    except ValueError as exc:
+        msg = str(exc)
+        raise HTTPException(status_code=404 if "not found" in msg else 400, detail=msg)
+
+
+@router.post("/{session_id}/restart")
+async def restart_session(
+    session_id: str = Path(..., description="Session ID"),
+    auth: dict = Depends(require_auth),
+):
+    """Rebuild this session now, keeping everything it remembers.
+
+    Storage, memory, transcripts and the conversation are on disk and
+    survive; only the running pipeline is replaced. It exists as its own
+    button because every other way to get a rebuild was a side effect of
+    changing something else — so "apply what I already set" had no way to
+    say so.
+
+    409 while a turn is running: a rebuild mid-answer loses the answer.
+    """
+    _enforce_session_owner(session_id, auth)
+    try:
+        return {"success": True, **await agent_manager.restart_session(session_id)}
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.put("/{session_id}/always-on")
 async def set_always_on(
     session_id: str = Path(..., description="Session ID"),

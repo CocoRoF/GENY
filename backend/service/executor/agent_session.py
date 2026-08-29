@@ -5519,6 +5519,7 @@ class AgentSession:
             pod_name=pod_name,
             pod_ip=pod_ip,
             role=self._role,
+            **self._persona_info(),
             always_on=self._always_on_override,
             workflow_id=self._workflow_id,
             graph_name=self._preset_name,
@@ -5533,6 +5534,49 @@ class AgentSession:
             memory_config=self._memory_config,
             trigger_preset_id=self._resolve_trigger_preset_id(),
         )
+
+    def _persona_info(self) -> Dict[str, Any]:
+        """Which persona this session runs, and where it came from.
+
+        A persona that resolves from the environment is invisible on the
+        session screen unless the session says so — and "why is it talking
+        like that" is not a question an operator should have to answer by
+        reading a manifest.
+        """
+        out: Dict[str, Any] = {
+            "persona_preset_id": None,
+            "effective_persona_preset_id": None,
+            "persona_source": "none",
+            "persona_name": None,
+        }
+        try:
+            from service.executor import get_agent_session_manager
+
+            mgr = get_agent_session_manager()
+            own = (self._store_record() or {}).get("persona_preset_id")
+            out["persona_preset_id"] = own if isinstance(own, str) and own else None
+            effective, source = mgr.resolve_persona_preset_id(
+                self._session_id, self._env_id
+            )
+            out["effective_persona_preset_id"] = effective
+            out["persona_source"] = source
+            if effective:
+                from service.persona_presets import get_persona_preset_store
+
+                out["persona_name"] = getattr(
+                    get_persona_preset_store().get(effective), "name", None
+                )
+        except Exception:  # noqa: BLE001 — session info must never fail on this
+            logger.debug("persona info unavailable", exc_info=True)
+        return out
+
+    def _store_record(self) -> Optional[Dict[str, Any]]:
+        try:
+            from service.sessions.store import get_session_store
+
+            return get_session_store().get(self._session_id)
+        except Exception:  # noqa: BLE001
+            return None
 
     def _resolve_trigger_preset_id(self) -> Optional[str]:
         """Lookup the trigger preset currently attached to this session.

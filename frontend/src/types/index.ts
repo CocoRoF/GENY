@@ -9,6 +9,14 @@ export interface SessionInfo {
   linked_session_id?: string | null;
   session_type?: string | null;
   chat_room_id?: string | null;
+  /** This session's OWN persona preset; null/absent = follow the
+   *  environment. `effective_*` and `persona_source` say what actually
+   *  runs and where it came from — a persona resolved from somewhere else
+   *  is exactly what an operator cannot deduce from the screen. */
+  persona_preset_id?: string | null;
+  effective_persona_preset_id?: string | null;
+  persona_source?: 'session' | 'environment' | 'none' | string | null;
+  persona_name?: string | null;
   /** The user's own keep-awake choice for THIS session. `true` keeps it
    *  resident whatever the host's idle policy says, `false` lets it be
    *  reclaimed even while the host keeps everything else awake, and

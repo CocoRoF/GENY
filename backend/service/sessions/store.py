@@ -465,6 +465,12 @@ class SessionStore:
             "session_type": rec.get("session_type"),
             "chat_room_id": rec.get("chat_room_id"),
             "trigger_preset_id": rec.get("trigger_preset_id"),
+            # The session's OWN persona, when it has one. Same class of bug
+            # as env_id above if omitted: the override would be dropped on
+            # every reload and the session would quietly revert to its
+            # environment's persona — the thing the override exists to
+            # escape.
+            "persona_preset_id": rec.get("persona_preset_id"),
         }
 
     def contains(self, session_id: str) -> bool:

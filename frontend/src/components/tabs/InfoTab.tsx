@@ -3,11 +3,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useCreatureStateStore } from '@/store/useCreatureStateStore';
-import { agentApi } from '@/lib/api';
+import { agentApi, personaPresetsApi } from '@/lib/api';
 import { twMerge } from 'tailwind-merge';
 import { useI18n } from '@/lib/i18n';
-import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser, Link2, Terminal, Brain, ExternalLink, Info, Power, Pin, PinOff } from 'lucide-react';
+import { RotateCcw, Trash2, Pencil, Save, X, FileText, Eraser, Link2, Terminal, Brain, ExternalLink, Info, Power, Pin, PinOff, Drama, RefreshCw } from 'lucide-react';
 import type { SessionInfo } from '@/types';
+import type { PersonaPresetSummary } from '@/lib/api';
 import ConfirmModal from '@/components/modals/ConfirmModal';
 import EnvironmentDetailDrawer from '@/components/EnvironmentDetailDrawer';
 import { TabShell, EmptyState, ActionButton } from '@/components/common/layout';
@@ -114,6 +115,68 @@ export default function InfoTab() {
       setWaking(false);
     }
   }, [selectedSessionId, fetchDetail]);
+
+  // Persona — until now this was a property of the ENVIRONMENT alone, so
+  // giving one session a different character meant building it another
+  // environment, and changing one meant editing an environment every
+  // session on it shares.
+  const [presets, setPresets] = useState<PersonaPresetSummary[]>([]);
+  const [personaBusy, setPersonaBusy] = useState(false);
+  const [personaNote, setPersonaNote] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    personaPresetsApi
+      .list()
+      .then((r) => { if (!cancelled) setPresets(r.presets || []); })
+      .catch(() => { if (!cancelled) setPresets([]); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const handlePersonaChange = useCallback(async (value: string) => {
+    if (!selectedSessionId) return;
+    setPersonaBusy(true);
+    setError('');
+    setPersonaNote('');
+    try {
+      const r = await agentApi.setPersona(selectedSessionId, value || null);
+      // Say WHICH of the two things happened. "Saved" alone leaves the
+      // operator wondering whether the agent is already using it.
+      setPersonaNote(
+        r.applied_now
+          ? (t('info.personaAppliedNow') ?? '적용했습니다.')
+          : r.live
+            ? (t('info.personaAfterTurn') ?? '저장했습니다 — 진행 중인 턴이 끝나면 반영됩니다.')
+            : (t('info.personaOnWake') ?? '저장했습니다 — 세션이 깨어날 때 반영됩니다.'),
+      );
+      await fetchDetail();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPersonaBusy(false);
+    }
+  }, [selectedSessionId, fetchDetail, t]);
+
+  const [restarting, setRestarting] = useState(false);
+  const handleRestart = useCallback(async () => {
+    if (!selectedSessionId) return;
+    setRestarting(true);
+    setError('');
+    setPersonaNote('');
+    try {
+      const r = await agentApi.restart(selectedSessionId);
+      setPersonaNote(
+        r.restarted
+          ? (t('info.restarted') ?? '세션을 다시 시작했습니다.')
+          : (t('info.restartDormant') ?? '휴면 상태라 다음 접근에 새로 구성됩니다.'),
+      );
+      await fetchDetail();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRestarting(false);
+    }
+  }, [selectedSessionId, fetchDetail, t]);
 
   // Keep awake — pin THIS session so the host never reclaims it for being
   // quiet. Persisted server-side, so it survives the eviction (and the
@@ -321,6 +384,61 @@ export default function InfoTab() {
           );
         })}
       </div>
+
+      {/* ── Persona ──
+          A persona used to be a property of the ENVIRONMENT alone: the only
+          way to give one session a different character was to build it
+          another environment, and the only way to change one was to edit an
+          environment every session on it shares. This panel is the session's
+          own answer, and it SAYS which one is in force — a persona resolved
+          from somewhere else is exactly what cannot be deduced from here. */}
+      {subTab === 'vtuber' && !isDeleted && (
+        <div className="mb-4 pb-4 border-b border-[var(--border-color)]">
+          <div className="flex items-center gap-1.5 mb-2">
+            <Drama size={14} className="text-[var(--text-muted)]" />
+            <span className="text-[12px] font-semibold uppercase tracking-[0.5px] text-[var(--text-muted)]">
+              {t('info.persona.title') ?? '페르소나'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={data.persona_preset_id ?? ''}
+              disabled={personaBusy}
+              onChange={(e) => void handlePersonaChange(e.target.value)}
+              aria-label={t('info.persona.title') ?? '페르소나'}
+              className="flex-1 min-w-0 h-8 px-2 rounded-md border border-[var(--border-color)] bg-[var(--bg-secondary)] text-[12.5px] text-[var(--text-primary)] disabled:opacity-60"
+            >
+              <option value="">
+                {t('info.persona.followEnv') ?? '환경 설정을 따름'}
+              </option>
+              {presets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}{p.mbti ? ` · ${p.mbti}` : ''}
+                </option>
+              ))}
+            </select>
+            <ActionButton
+              icon={RefreshCw}
+              spinIcon={restarting}
+              disabled={restarting}
+              onClick={handleRestart}
+              title={t('info.persona.restartHint') ?? '지금 세션을 다시 구성합니다. 대화와 기억은 그대로입니다.'}
+            >
+              {t('info.persona.restart') ?? '다시 시작'}
+            </ActionButton>
+          </div>
+          <p className="mt-1.5 text-[11.5px] text-[var(--text-muted)] leading-relaxed">
+            {data.persona_source === 'session'
+              ? `${t('info.persona.fromSession') ?? '이 세션 전용'}: ${data.persona_name || data.effective_persona_preset_id}`
+              : data.persona_source === 'environment'
+                ? `${t('info.persona.fromEnv') ?? '환경에서 상속'}: ${data.persona_name || data.effective_persona_preset_id}`
+                : (t('info.persona.none') ?? '적용된 페르소나가 없습니다.')}
+          </p>
+          {personaNote && (
+            <p className="mt-1 text-[11.5px] text-[var(--success-color)]">{personaNote}</p>
+          )}
+        </div>
+      )}
 
       {/* ── Thinking Trigger Toggle (VTuber sessions only) ── */}
       {subTab === 'vtuber' && !isDeleted && data.session_type === 'vtuber' && thinkingTriggerEnabled !== null && (

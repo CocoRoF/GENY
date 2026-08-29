@@ -17,7 +17,7 @@ Usage example:
 
 from datetime import datetime
 from logging import getLogger
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:  # quoted-annotation only — no import cycle at runtime
     from service.tick.engine import TickEngine
@@ -579,12 +579,40 @@ class AgentSessionManager:
             return None
         return None
 
-    def _compile_env_persona(self, env_id: Optional[str]) -> Optional[str]:
-        """Resolve + compile the env's attached persona preset, or ``None``.
+    def resolve_persona_preset_id(
+        self, session_id: Optional[str], env_id: Optional[str],
+    ) -> Tuple[Optional[str], str]:
+        """Which persona this session runs, and where it came from.
+
+        Order: the SESSION's own choice, then the environment's. A session
+        override exists because a persona used to be a property of the
+        environment alone — the only way to give one session a different
+        character was to build it another environment, and the only way to
+        change one was to edit an environment shared by every session on it.
+
+        Returns ``(preset_id, source)`` with source in
+        ``{"session", "environment", "none"}`` so callers can SAY which
+        one is in force rather than leaving the operator to guess.
+        """
+        if session_id:
+            try:
+                rec = self._store.get(session_id) or {}
+                own = rec.get("persona_preset_id")
+                if isinstance(own, str) and own.strip():
+                    return own.strip(), "session"
+            except Exception:  # noqa: BLE001 — never block a build on the store
+                logger.debug("persona: session override lookup failed", exc_info=True)
+        from_env = self._env_persona_preset_id(env_id)
+        return (from_env, "environment") if from_env else (None, "none")
+
+    def _compile_persona(
+        self, session_id: Optional[str], env_id: Optional[str],
+    ) -> Optional[str]:
+        """Resolve + compile the persona in force for this session, or ``None``.
 
         Best-effort: a missing/deleted preset or an unwired store never blocks
         session creation."""
-        preset_id = self._env_persona_preset_id(env_id)
+        preset_id, source = self.resolve_persona_preset_id(session_id, env_id)
         if not preset_id:
             return None
         try:
@@ -592,9 +620,16 @@ class AgentSessionManager:
 
             defn = get_persona_preset_store().get(preset_id)
             text = compile_persona(defn)
+            if text.strip():
+                logger.info(
+                    "  🎭 persona '%s' (%s) resolved from %s",
+                    getattr(defn, "name", preset_id), preset_id, source,
+                )
             return text.strip() or None
         except Exception as e:  # noqa: BLE001
-            logger.warning(f"persona preset {preset_id} for env {env_id} not applied: {e}")
+            logger.warning(
+                "persona preset %s (%s) not applied: %s", preset_id, source, e
+            )
             return None
 
     def _env_host_selection(
@@ -1533,7 +1568,7 @@ class AgentSessionManager:
         # Persona Preset (Geny persona builder) — if this env has one attached,
         # compile it and prepend so the character identity leads the prompt, ahead
         # of the role/behaviour base. Best-effort; never blocks session creation.
-        persona_block = self._compile_env_persona(env_id)
+        persona_block = self._compile_persona(session_id, env_id)
         if persona_block:
             system_prompt = (
                 f"{persona_block}\n\n---\n\n{system_prompt}" if system_prompt else persona_block
@@ -2228,6 +2263,90 @@ class AgentSessionManager:
                 f"flagged for manifest reload: {affected}"
             )
         return affected
+
+    async def set_session_persona(
+        self, session_id: str, preset_id: Optional[str],
+    ) -> Dict[str, Any]:
+        """Give ONE session its own persona, or hand it back to the env.
+
+        ``preset_id=None`` clears the override, so the session follows its
+        environment again — which is what it did before this existed.
+
+        Applied the way every other binding change is: persisted first (so
+        it survives eviction and restart), then the live session rebuilds.
+        A session that is mid-turn is FLAGGED rather than torn down —
+        rebuilding underneath a running answer is how you lose one — and
+        picks the persona up between turns.
+
+        Raises ValueError for an unknown session or an unknown preset: a
+        persona that silently does not exist is worse than a refusal.
+        """
+        rec = self._store.get(session_id)
+        if not rec:
+            raise ValueError(f"session not found: {session_id}")
+
+        cleaned = (preset_id or "").strip() or None
+        if cleaned:
+            from service.persona_presets import get_persona_preset_store
+            from service.persona_presets.store import PersonaPresetNotFound
+
+            try:
+                get_persona_preset_store().get(cleaned)
+            except PersonaPresetNotFound:
+                raise ValueError(f"persona preset not found: {cleaned}")
+
+        self._store.update(session_id, {"persona_preset_id": cleaned})
+
+        applied_now = False
+        agent = self._local_agents.get(session_id)
+        if agent is not None:
+            if self._session_busy(session_id, agent):
+                # Between turns, not mid-answer.
+                agent._needs_manifest_reload = True
+            else:
+                await self._reload_session_manifest(session_id)
+                applied_now = True
+
+        effective, source = self.resolve_persona_preset_id(session_id, rec.get("env_id"))
+        logger.info(
+            "[%s] persona override -> %s (effective %s from %s, applied_now=%s)",
+            session_id, cleaned, effective, source, applied_now,
+        )
+        return {
+            "session_id": session_id,
+            "persona_preset_id": cleaned,
+            "effective_preset_id": effective,
+            "persona_source": source,
+            "applied_now": applied_now,
+            "live": agent is not None,
+        }
+
+    async def restart_session(self, session_id: str) -> Dict[str, Any]:
+        """Rebuild this session now, keeping everything it remembers.
+
+        The same in-place rebuild an env edit triggers — storage, memory,
+        transcripts and the conversation are on disk and survive; only the
+        running pipeline is replaced. Exposed on its own because every
+        other way to get one was a side effect of changing something else,
+        so "just apply what I already set" had no button.
+
+        Refuses mid-turn rather than tearing down a running answer.
+        """
+        rec = self._store.get(session_id)
+        if not rec:
+            raise ValueError(f"session not found: {session_id}")
+
+        agent = self._local_agents.get(session_id)
+        if agent is not None and self._session_busy(session_id, agent):
+            raise RuntimeError("세션이 실행 중입니다. 끝난 뒤 다시 시도해 주세요.")
+
+        if agent is None:
+            # Dormant: it will build from the current state on next access,
+            # which is exactly what a restart would have produced.
+            return {"session_id": session_id, "restarted": False, "reason": "dormant"}
+
+        rebuilt = await self._reload_session_manifest(session_id)
+        return {"session_id": session_id, "restarted": rebuilt is not None}
 
     async def change_session_env(
         self, session_id: str, env_id: str

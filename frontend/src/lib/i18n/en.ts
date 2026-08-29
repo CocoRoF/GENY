@@ -878,6 +878,20 @@ const en = {
 
   // ─── Info Tab ───
   info: {
+    persona: {
+      title: 'Persona',
+      followEnv: 'Follow the environment',
+      fromSession: 'This session only',
+      fromEnv: 'Inherited from the environment',
+      none: 'No persona applied.',
+      restart: 'Restart',
+      restartHint: 'Rebuild this session now. The conversation and its memory are kept.',
+    },
+    personaAppliedNow: 'Applied.',
+    personaAfterTurn: 'Saved — it takes effect when the current turn finishes.',
+    personaOnWake: 'Saved — it takes effect when the session wakes.',
+    restarted: 'Session restarted.',
+    restartDormant: 'Dormant — it will be rebuilt on next access.',
     wakeUp: 'Wake Up',
     wakingUp: 'Waking…',
     keepAwakeOn: 'Always on',
