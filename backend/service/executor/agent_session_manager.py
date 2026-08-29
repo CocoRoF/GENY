@@ -2264,6 +2264,64 @@ class AgentSessionManager:
             )
         return affected
 
+    #: A persona's ``emotion.default_mood`` names where its feelings rest.
+    #: The live mood vector is 6 floats; "neutral" is the absence of a
+    #: peak, not a seventh axis.
+    _PERSONA_BASELINE = 0.5
+
+    async def _reset_mood_to_persona(self, session_id: str, preset_id: Optional[str]) -> bool:
+        """Point the live mood at the NEW persona's resting disposition.
+
+        Swapping a persona used to change what the agent was told it is
+        while leaving what it currently FEELS untouched. Production:
+        a session moved onto an outgoing ESFP preset (extraversion 85,
+        enthusiasm 90) kept ``calm: 0.98`` from months under the previous
+        character, and every reply still came out calm — the persona had
+        applied, and nothing about the agent's manner moved.
+
+        Mood is a running EMA, so a settled value dominates for a long
+        time; nudging it is not enough, and it has to be reset at the one
+        moment the character legitimately discontinues. Only on an actual
+        persona CHANGE — a rebuild for any other reason keeps the
+        emotional continuity that makes the agent feel like itself.
+        """
+        if not preset_id:
+            return False
+        try:
+            from service.persona_presets import get_persona_preset_store
+
+            defn = get_persona_preset_store().get(preset_id)
+            mood_name = str(
+                getattr(getattr(defn, "emotion", None), "default_mood", "") or ""
+            ).strip().lower()
+        except Exception:  # noqa: BLE001 — a persona swap must not fail on this
+            logger.debug("persona mood reset: preset unreadable", exc_info=True)
+            return False
+
+        from service.state.schema.mood import MoodVector
+
+        fresh = {k: 0.0 for k in MoodVector.keys()}
+        if mood_name in fresh:
+            fresh[mood_name] = self._PERSONA_BASELINE
+        # "neutral" (and anything unrecognised) lands as all-zero: no peak,
+        # which is what neutral means here.
+
+        try:
+            provider = self._state_provider
+            if provider is None:
+                return False
+            await provider.set_absolute(
+                session_id, {f"mood.{k}": v for k, v in fresh.items()}
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("persona mood reset failed", exc_info=True)
+            return False
+        logger.info(
+            "[%s] mood reset to the new persona's resting disposition (%s)",
+            session_id, mood_name or "neutral",
+        )
+        return True
+
     async def set_session_persona(
         self, session_id: str, preset_id: Optional[str],
     ) -> Dict[str, Any]:
@@ -2285,6 +2343,7 @@ class AgentSessionManager:
         if not rec:
             raise ValueError(f"session not found: {session_id}")
 
+        before, _ = self.resolve_persona_preset_id(session_id, rec.get("env_id"))
         cleaned = (preset_id or "").strip() or None
         if cleaned:
             from service.persona_presets import get_persona_preset_store
@@ -2308,6 +2367,11 @@ class AgentSessionManager:
                 applied_now = True
 
         effective, source = self.resolve_persona_preset_id(session_id, rec.get("env_id"))
+        # The character discontinues here and only here — so this is the one
+        # moment its accumulated feelings should not carry over.
+        mood_reset = False
+        if effective != before:
+            mood_reset = await self._reset_mood_to_persona(session_id, effective)
         logger.info(
             "[%s] persona override -> %s (effective %s from %s, applied_now=%s)",
             session_id, cleaned, effective, source, applied_now,
@@ -2318,6 +2382,7 @@ class AgentSessionManager:
             "effective_preset_id": effective,
             "persona_source": source,
             "applied_now": applied_now,
+            "mood_reset": mood_reset,
             "live": agent is not None,
         }
 

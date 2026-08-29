@@ -192,3 +192,79 @@ def test_the_override_survives_a_reload():
     import inspect
     src = inspect.getsource(SessionStore.get_creation_params)
     assert '"persona_preset_id"' in src
+
+
+# ── the mood the old persona left behind ─────────────────────────────
+
+class _StateProvider:
+    def __init__(self):
+        self.patches = []
+
+    async def set_absolute(self, cid, patch):
+        self.patches.append((cid, patch))
+
+
+def _mgr_with_state(rec=None, env_preset=None, mood="joy"):
+    m = _mgr(rec=rec, env_preset=env_preset)
+    m._state_provider = _StateProvider()
+    m._preset_emotion = mood
+    return m
+
+
+def _patch_store(monkeypatch, mood="joy"):
+    monkeypatch.setattr(
+        "service.persona_presets.get_persona_preset_store",
+        lambda: SimpleNamespace(
+            get=lambda _i: SimpleNamespace(
+                name="엘렌", emotion=SimpleNamespace(default_mood=mood),
+            ),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_persona_change_resets_the_mood_it_inherited(monkeypatch):
+    """Swapping a persona changed what the agent was TOLD it is while
+    leaving what it FEELS untouched. Production: a session moved onto an
+    outgoing ESFP preset kept `calm: 0.98` from the previous character and
+    every reply still came out calm."""
+    m = _mgr_with_state()
+    _patch_store(monkeypatch, mood="joy")
+    out = await m.set_session_persona("s1", "p-new")
+    assert out["mood_reset"] is True
+    (_cid, patch), = m._state_provider.patches
+    assert patch["mood.joy"] == m._PERSONA_BASELINE
+    assert patch["mood.calm"] == 0.0, "the old resting mood survived the swap"
+
+
+@pytest.mark.asyncio
+async def test_neutral_means_no_peak(monkeypatch):
+    """The live vector has six axes and 'neutral' is not one of them — it
+    is the absence of a peak."""
+    m = _mgr_with_state()
+    _patch_store(monkeypatch, mood="neutral")
+    await m.set_session_persona("s1", "p-new")
+    (_cid, patch), = m._state_provider.patches
+    assert set(patch.values()) == {0.0}
+
+
+@pytest.mark.asyncio
+async def test_reapplying_the_same_persona_keeps_the_mood(monkeypatch):
+    """Emotional continuity is what makes the agent feel like itself. Only
+    a real discontinuation should wipe it."""
+    m = _mgr_with_state(rec={"env_id": "env-1", "persona_preset_id": "same"})
+    _patch_store(monkeypatch)
+    out = await m.set_session_persona("s1", "same")
+    assert out["mood_reset"] is False
+    assert m._state_provider.patches == []
+
+
+@pytest.mark.asyncio
+async def test_an_unwired_state_provider_is_not_an_error(monkeypatch):
+    """Classic (non-creature) sessions have no mood to reset."""
+    m = _mgr()
+    m._state_provider = None
+    _patch_store(monkeypatch)
+    out = await m.set_session_persona("s1", "p-new")
+    assert out["mood_reset"] is False
+    assert out["success"] if "success" in out else True

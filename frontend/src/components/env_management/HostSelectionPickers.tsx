@@ -26,6 +26,7 @@ import {
   type SandboxToolPackSummary,
   personaPresetsApi,
   type PersonaPresetSummary,
+  type PersonaPresetDefinition,
 } from '@/lib/api';
 import { permissionId } from '@/lib/envDefaultsApi';
 import { triggerPresetApi } from '@/lib/triggerPresetApi';
@@ -314,6 +315,40 @@ export function PersonaPresetPicker() {
     return typeof raw === 'string' ? raw : '';
   }, [draft]);
 
+  // What the chosen preset actually IS.
+  //
+  // The picker used to be a bare name dropdown, which is how a preset can
+  // be copied, given an outgoing MBTI and a high enthusiasm, and still
+  // carry `default_mood: calm` from the original — the compiled prompt
+  // then says "Your resting disposition leans calm" and every reply comes
+  // out calm while the summary line reads ESFP. Nothing on screen showed
+  // the contradiction, so the only way to find it was to read the
+  // compiled prompt in a database.
+  // Keyed by id rather than cleared in an effect: "nothing is selected"
+  // is derivable at render, and clearing it with a synchronous setState
+  // would be a cascading render for a fact we already know.
+  // One piece of state, keyed by the id it answers for, so "which preset"
+  // and "settled or not" cannot disagree — and both "nothing selected"
+  // and "still loading" are derived at render rather than written by a
+  // synchronous setState inside the effect.
+  const [loaded, setLoaded] = useState<
+    { id: string; defn: PersonaPresetDefinition | null } | null
+  >(null);
+  const [showPrompt, setShowPrompt] = useState(false);
+  const settled = !!selected && loaded?.id === selected;
+  const detail = settled ? loaded!.defn : null;
+  const detailBusy = !!selected && !settled;
+
+  useEffect(() => {
+    if (!selected) return;
+    let cancelled = false;
+    personaPresetsApi
+      .get(selected)
+      .then((d) => { if (!cancelled) setLoaded({ id: selected, defn: d }); })
+      .catch(() => { if (!cancelled) setLoaded({ id: selected, defn: null }); });
+    return () => { cancelled = true; };
+  }, [selected]);
+
   return (
     <div className="flex flex-col gap-2">
       <label className="text-[0.8125rem] font-medium text-[hsl(var(--foreground))]">
@@ -338,6 +373,78 @@ export function PersonaPresetPicker() {
         <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))] leading-relaxed">
           이 환경의 세션에 적용할 페르소나(성격)를 선택합니다. 페르소나는 「페르소나」 탭에서 만들 수 있어요.
         </p>
+      )}
+
+      {selected && (detail || detailBusy) && (
+        <div className="mt-1 rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30 p-3 flex flex-col gap-2">
+          {detailBusy && !detail ? (
+            <p className="text-[0.7rem] text-[hsl(var(--muted-foreground))]">불러오는 중…</p>
+          ) : detail ? (
+            <>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[detail.mbti, detail.enneagram && `에니어 ${detail.enneagram}`, detail.archetype]
+                  .filter(Boolean)
+                  .map((tag) => (
+                    <span
+                      key={String(tag)}
+                      className="px-1.5 py-0.5 rounded text-[0.68rem] bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))]"
+                    >
+                      {String(tag)}
+                    </span>
+                  ))}
+              </div>
+
+              {/* The field that silently decides tone. It is stated on its
+                  own line, in the same words the compiled prompt uses, so
+                  a lively MBTI sitting on a calm resting mood is visible
+                  here instead of only in the agent's replies. */}
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[0.72rem]">
+                <dt className="text-[hsl(var(--muted-foreground))]">기본 감정</dt>
+                <dd className="text-[hsl(var(--foreground))]">
+                  {detail.emotion?.default_mood || 'neutral'}
+                  <span className="text-[hsl(var(--muted-foreground))]">
+                    {' '}· 표현 강도 {detail.emotion?.expressiveness ?? 50}
+                    {detail.emotion?.preferred_tags?.length
+                      ? ` · 주로 ${detail.emotion.preferred_tags.join(', ')}`
+                      : ''}
+                  </span>
+                </dd>
+                <dt className="text-[hsl(var(--muted-foreground))]">외향/열의</dt>
+                <dd className="text-[hsl(var(--foreground))]">
+                  {detail.ocean?.extraversion ?? 50} / {detail.style?.enthusiasm ?? 50}
+                </dd>
+                <dt className="text-[hsl(var(--muted-foreground))]">말투</dt>
+                <dd className="text-[hsl(var(--foreground))]">
+                  {detail.speech?.honorific === 'banmal' ? '반말' : '존댓말'}
+                  {detail.speech?.self_reference ? ` · 자칭 "${detail.speech.self_reference}"` : ''}
+                </dd>
+              </dl>
+
+              {(detail.emotion?.default_mood === 'calm' ||
+                detail.emotion?.default_mood === 'neutral') &&
+                (detail.ocean?.extraversion ?? 50) >= 70 && (
+                  <p className="text-[0.7rem] text-amber-600 dark:text-amber-400 leading-relaxed">
+                    외향적인 성격인데 기본 감정이 «{detail.emotion?.default_mood}» 입니다 — 프롬프트에
+                    «resting disposition leans {detail.emotion?.default_mood}» 가 들어가 말투가 차분해집니다.
+                    활발하게 하려면 「페르소나」 탭에서 기본 감정을 바꿔 주세요.
+                  </p>
+                )}
+
+              <button
+                type="button"
+                onClick={() => setShowPrompt((v) => !v)}
+                className="self-start text-[0.7rem] underline text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+              >
+                {showPrompt ? '프롬프트 접기' : '적용될 프롬프트 보기'}
+              </button>
+              {showPrompt && (
+                <pre className="max-h-56 overflow-auto whitespace-pre-wrap text-[0.68rem] leading-relaxed p-2 rounded bg-[hsl(var(--background))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))]">
+                  {detail.compiled_prompt || '(비어 있음)'}
+                </pre>
+              )}
+            </>
+          ) : null}
+        </div>
       )}
     </div>
   );
