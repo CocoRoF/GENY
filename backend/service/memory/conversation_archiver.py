@@ -1305,40 +1305,41 @@ class ConversationArchiver:
           3. Otherwise create a new file using
              :func:`bucket_path_for` to compose the suffix.
         """
+        from service.memory.frontmatter import parse_frontmatter
         from service.memory.sync_async_bridge import run_coro_sync
 
         notes = self._provider.notes() if self._provider is not None else None
 
         def _read_meta_body(rel: str) -> Tuple[Dict[str, Any], str]:
-            if notes is None:
-                return {}, ""
-            bare = Path(rel).name
+            """The existing rollup's frontmatter + body, read from disk.
+
+            This is the file THIS archiver wrote, in a directory it
+            already addresses, so reading it is a file read — while
+            ``notes.read()`` takes the notes store's process-wide lock
+            and, on a cold store, triggers the full-vault scan first
+            (every note read and frontmatter-parsed). Doing that from a
+            nested event loop on the single side-effect worker is how
+            this path kept blowing its 120s budget while the main loop's
+            own memory writes queued behind the same lock — the same
+            contention the directory listing below was already moved off.
+
+            The notes store parses this identical file with the same
+            parser, so nothing about the result changes.
+            """
+            path = self._memory_dir / rel
             try:
-                note = run_coro_sync(notes.read(bare))
-            except Exception:  # noqa: BLE001
+                raw = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                return {}, ""
+            except OSError:
                 logger.debug(
-                    "conversation_archiver: provider read failed for %s",
-                    rel, exc_info=True,
+                    "conversation_archiver: could not read %s", rel, exc_info=True,
                 )
                 return {}, ""
-            if note is None:
-                return {}, ""
-            meta: Dict[str, Any] = {
-                "title": note.title,
-                "tags": list(note.tags),
-                "category": note.category or CATEGORY,
-                "importance": note.importance.value,
-            }
-            if note.created_at:
-                meta["created"] = note.created_at.isoformat()
-            if note.updated_at:
-                meta["modified"] = note.updated_at.isoformat()
-            if note.links_out:
-                meta["links_to"] = list(note.links_out)
-            for k, v in (note.frontmatter or {}).items():
-                if k not in meta:
-                    meta[k] = v
-            return meta, note.body
+            meta, body = parse_frontmatter(raw)
+            meta = dict(meta or {})
+            meta.setdefault("category", CATEGORY)
+            return meta, body
 
         cached = self._cached_rel.get(base_slug)
         if cached:
