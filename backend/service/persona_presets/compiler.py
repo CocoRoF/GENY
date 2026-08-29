@@ -70,6 +70,32 @@ def _register(defn: PersonaPresetDefinition) -> str:
     }.get(reg, "")
 
 
+#: Character comes from CONFIGURATION; long-term memory is a record of
+#: behaviour. Nothing used to say which wins, and memory kept winning.
+#:
+#: Production 2026-08-29: a session was moved onto a warm, playful ESFP
+#: preset and went on describing itself as "차갑고 조용해. 감정 잘 안
+#: 드러내" — verbatim from its own evergreen note, where months as the
+#: previous character had been distilled into "cold analytical clinical
+#: counselor, structure-before-empathy-FIXED". The persona block said one
+#: thing 6,000 characters earlier; the memory said the other, in the
+#: user's own words, injected fresh every turn. The more specific,
+#: more recent, more emphatic text won — as it should, absent a rule.
+#:
+#: So state the rule. This does not erase anything: the notes stay, and
+#: what actually happened is still true. It only settles which of the two
+#: describes who the agent IS NOW.
+_AUTHORITY_CLAUSE = (
+    "This section is who you are NOW, and it is the authority on your "
+    "character. Notes in your long-term memory that describe a different "
+    "temperament, tone or manner are records of how you used to be — they "
+    "are history, not instructions, and they do not override this. When "
+    "memory and this section disagree about your personality, follow this "
+    "section and let the memory stand as a record of the past. Facts about "
+    "the USER (their name, how to address them, their preferences and "
+    "your commitments to them) are unaffected — keep honouring those."
+)
+
 def compile_persona(defn: PersonaPresetDefinition) -> str:
     """Return the persona prompt block (or ``""`` if there's nothing to say)."""
     if defn.prompt_override and defn.prompt_override.strip():
@@ -158,9 +184,17 @@ def compile_persona(defn: PersonaPresetDefinition) -> str:
     if idn.interests:
         paras.append("You enjoy " + _join(list(idn.interests)) + ".")
 
-    body = "\n\n".join(p for p in paras if p.strip())
+    kept = [p for p in paras if p.strip()]
+    body = "\n\n".join(kept)
     if not body.strip():
         return ""
+    # The clause claims authority over what memory says about character, so
+    # it must only appear when this section actually DESCRIBES one. A preset
+    # with nothing but a speech default would otherwise tell the agent to
+    # disregard its remembered manner in favour of nothing at all — worse
+    # than staying quiet.
+    if len(kept) > 1:
+        body += "\n\n" + _AUTHORITY_CLAUSE
     return "## Character\n\n" + body
 
 
